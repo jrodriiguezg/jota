@@ -19,7 +19,7 @@ step() { echo -e "\n${BOLD}${BLUE}[$1]${NC} ${BOLD}$2${NC}"; }
 
 # ── Config ────────────────────────────────────────────────────────────────────
 MODELS_DIR="$HOME/.local/share/jota/models"
-WHISPER_BIN="/usr/local/bin/whisper-cli"
+WHISPER_BIN="$HOME/.local/bin/whisper-cli"
 PIPER_BIN="$HOME/.local/bin/piper"
 WHISPER_BUILD_DIR="/tmp/jota-whisper-build"
 PIPER_VERSION="2023.11.14-2"
@@ -101,6 +101,7 @@ else
     cmake -B "$WHISPER_BUILD_DIR/build" \
           -S "$WHISPER_BUILD_DIR" \
           -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_SHARED_LIBS=OFF \
           -DWHISPER_BUILD_TESTS=OFF \
           -DWHISPER_BUILD_EXAMPLES=ON \
           2>&1 | tail -3
@@ -111,7 +112,8 @@ else
           -j"$(nproc)" \
           2>&1 | tail -5
 
-    sudo install -m 755 "$WHISPER_BUILD_DIR/build/bin/whisper-cli" "$WHISPER_BIN"
+    mkdir -p "$HOME/.local/bin"
+    install -m 755 "$WHISPER_BUILD_DIR/build/bin/whisper-cli" "$WHISPER_BIN"
     ok "whisper-cli instalado en $WHISPER_BIN"
     rm -rf "$WHISPER_BUILD_DIR"
 fi

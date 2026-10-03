@@ -13,7 +13,11 @@ MODELS_DIR = Path.home() / ".local" / "share" / "jota" / "models"
 
 # Whisper: ruta al binario de whisper.cpp
 # Nota: en versiones recientes el binario se llama whisper-cli (antes whisper-cpp)
-WHISPER_BIN = Path("/usr/local/bin/whisper-cli")
+WHISPER_BIN = Path(
+    shutil.which("whisper-cli")
+    or (Path.home() / ".local" / "bin" / "whisper-cli")
+    or "/usr/local/bin/whisper-cli"
+)
 # Modelo de whisper a usar (small es suficiente para comandos en español)
 WHISPER_MODEL = MODELS_DIR / "whisper" / "ggml-small.bin"
 # Idioma de reconocimiento

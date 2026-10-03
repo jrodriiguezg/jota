@@ -289,6 +289,12 @@ def get_phone_status(device_id: str | None = None):
     return phone_manager.get_device_status(device_id=device_id)
 
 
+@app.get("/api/v1/phone/devices", dependencies=[Depends(verify_auth)])
+def get_phone_devices():
+    """Lista todos los dispositivos Android conectados actualmente."""
+    return {"devices": phone_manager.list_connected_devices()}
+
+
 # ── Canal WebSocket para la Aplicacion Android ───────────────────────────────
 
 
