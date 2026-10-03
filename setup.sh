@@ -27,8 +27,8 @@ PIPER_VERSION="2023.11.14-2"
 WHISPER_MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
 PIPER_MODEL_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/sharvard/medium"
 PIPER_MODEL_NAME="es_ES-sharvard-medium"
-QWEN_MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
-QWEN_MODEL_NAME="qwen2.5-0.5b-instruct-q4_k_m.gguf"
+QWEN_MODEL_URL="https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf"
+QWEN_MODEL_NAME="Qwen3-0.6B-Q8_0.gguf"
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo -e "\n${BOLD}====================================================${NC}"
@@ -192,17 +192,19 @@ else
 fi
 
 # =============================================================================
-step "7/8" "Modelo LLM Qwen GGUF (~398 MB)"
+step "7/8" "Modelo LLM Qwen3 GGUF (~609 MB)"
 # =============================================================================
 mkdir -p "$MODELS_DIR/qwen"
 QWEN_MODEL_FILE="$MODELS_DIR/qwen/$QWEN_MODEL_NAME"
 
-if ls "$MODELS_DIR/qwen"/*.gguf &>/dev/null 2>&1; then
-    already "Modelo Qwen GGUF ($(ls "$MODELS_DIR/qwen"/*.gguf | head -1))"
+if [[ -f "$QWEN_MODEL_FILE" ]]; then
+    already "Modelo Qwen3 GGUF ($QWEN_MODEL_FILE)"
+elif ls "$MODELS_DIR/qwen"/*.gguf &>/dev/null 2>&1; then
+    already "Modelo Qwen GGUF alternativo ($(ls "$MODELS_DIR/qwen"/*.gguf | head -1))"
 else
-    info "Descargando modelo Qwen 2.5 0.5B Instruct GGUF (q4_k_m)..."
+    info "Descargando modelo oficial Qwen3 0.6B GGUF (Q8_0)..."
     curl -L "$QWEN_MODEL_URL" -o "$QWEN_MODEL_FILE" --progress-bar
-    ok "Modelo Qwen guardado en $QWEN_MODEL_FILE"
+    ok "Modelo Qwen3 guardado en $QWEN_MODEL_FILE"
 fi
 
 # =============================================================================

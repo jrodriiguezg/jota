@@ -72,9 +72,14 @@ def ask(prompt: str) -> str:
 
 def clean_text_for_tts(text: str) -> str:
     """
-    Limpia simbolos de markdown y caracteres no hablados para que el
-    motor de voz (TTS) hable de forma natural y fluida.
+    Limpia simbolos de markdown, bloques de razonamiento (<think>) y
+    caracteres no hablados para que el motor TTS hable de forma natural.
     """
+    # Eliminar bloques de razonamiento interno de Qwen3 (<think>...</think>)
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    if "<think>" in text:
+        text = re.sub(r"<think>[\s\S]*$", "", text)
+
     # Eliminar bloques de codigo
     text = re.sub(r"```[\s\S]*?```", "", text)
     # Eliminar negritas, cursivas, tachados, codigo en linea y encabezados (*, _, ~, `, #)
