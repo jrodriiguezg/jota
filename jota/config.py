@@ -36,7 +36,7 @@ PIPER_MODEL = MODELS_DIR / "piper" / "es_ES-sharvard-medium.onnx"
 
 # Palabras que activan el asistente (en minúsculas).
 # Se eliminan del inicio de la frase antes de pasar al LLM.
-WAKE_WORDS = ["jota", "hota"]  # variantes por si whisper transcribe diferente
+WAKE_WORDS = ["jota", "hota", "j"]  # Whisper transcribe frecuentemente 'J' a secas
 
 # ── Audio ────────────────────────────────────────────────────────────────────
 
