@@ -215,6 +215,54 @@ class BridgeClient(
         response.body?.bytes() ?: ByteArray(0)
     }
 
+    suspend fun getPcScreenshots(): List<JSONObject> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/api/v1/pc/screenshots")
+            .header("X-Bridge-Key", apiKey)
+            .get()
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        val bodyStr = response.body?.string() ?: "{}"
+        val json = JSONObject(bodyStr)
+        val array = json.optJSONArray("screenshots") ?: org.json.JSONArray()
+        val list = mutableListOf<JSONObject>()
+        for (i in 0 until array.length()) {
+            list.add(array.getJSONObject(i))
+        }
+        list
+    }
+
+    suspend fun getScreenshotBytes(nameOrPath: String): ByteArray = withContext(Dispatchers.IO) {
+        val encoded = java.net.URLEncoder.encode(nameOrPath, "UTF-8")
+        val request = Request.Builder()
+            .url("$baseUrl/api/v1/pc/screenshots/file?name=$encoded")
+            .header("X-Bridge-Key", apiKey)
+            .get()
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        response.body?.bytes() ?: ByteArray(0)
+    }
+
+    suspend fun captureNewScreenshot(): List<JSONObject> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/api/v1/pc/screenshots/capture")
+            .header("X-Bridge-Key", apiKey)
+            .post("{}".toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        val bodyStr = response.body?.string() ?: "{}"
+        val json = JSONObject(bodyStr)
+        val array = json.optJSONArray("screenshots") ?: org.json.JSONArray()
+        val list = mutableListOf<JSONObject>()
+        for (i in 0 until array.length()) {
+            list.add(array.getJSONObject(i))
+        }
+        list
+    }
+
     suspend fun getPcClipboard(): String = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("$baseUrl/api/v1/pc/clipboard")

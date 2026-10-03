@@ -38,7 +38,10 @@ import androidx.core.content.ContextCompat
 import com.jota.link.audio.AudioHelper
 import com.jota.link.network.BridgeClient
 import com.jota.link.service.JotaBridgeService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     private val audioHelper = AudioHelper()
@@ -152,24 +155,115 @@ class MainActivity : ComponentActivity() {
         var inputKey by remember { mutableStateOf(apiKey) }
         var inputId by remember { mutableStateOf(deviceId) }
 
-        var screenshotBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+        var screenshotsList by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+        var currentScreenshotIndex by remember { mutableStateOf(0) }
+        var currentScreenshotBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+        var isScreenshotLoading by remember { mutableStateOf(false) }
         var showScreenshotDialog by remember { mutableStateOf(false) }
 
-        fun loadScreenshot() {
+        fun loadScreenshotAtIndex(index: Int) {
+            if (index < 0 || index >= screenshotsList.size) return
+            currentScreenshotIndex = index
+            val item = screenshotsList[index]
+            val filename = item.optString("filename", "")
+            val relPath = item.optString("relative_path", filename)
+            val queryName = if (relPath.isNotEmpty()) relPath else filename
+            isScreenshotLoading = true
             scope.launch {
                 try {
-                    val bytes = bridgeClient?.getPcScreenshot()
+                    val bytes = bridgeClient?.getScreenshotBytes(queryName)
                     if (bytes != null && bytes.isNotEmpty()) {
                         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                         if (bmp != null) {
-                            screenshotBitmap = bmp.asImageBitmap()
-                            showScreenshotDialog = true
+                            currentScreenshotBitmap = bmp.asImageBitmap()
                         }
-                    } else {
-                        Toast.makeText(this@MainActivity, "No se recibio imagen del PC", Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "Fallo al obtener captura: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Error al cargar captura: ${e.message}", Toast.LENGTH_SHORT).show()
+                } finally {
+                    isScreenshotLoading = false
+                }
+            }
+        }
+
+        fun openScreenshotsGallery() {
+            showScreenshotDialog = true
+            isScreenshotLoading = true
+            scope.launch {
+                try {
+                    val list = bridgeClient?.getPcScreenshots() ?: emptyList()
+                    if (list.isNotEmpty()) {
+                        screenshotsList = list
+                        loadScreenshotAtIndex(0)
+                    } else {
+                        val captured = bridgeClient?.captureNewScreenshot() ?: emptyList()
+                        if (captured.isNotEmpty()) {
+                            screenshotsList = captured
+                            loadScreenshotAtIndex(0)
+                        } else {
+                            val bytes = bridgeClient?.getPcScreenshot()
+                            if (bytes != null && bytes.isNotEmpty()) {
+                                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                if (bmp != null) {
+                                    currentScreenshotBitmap = bmp.asImageBitmap()
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Error al listar capturas: ${e.message}", Toast.LENGTH_SHORT).show()
+                } finally {
+                    isScreenshotLoading = false
+                }
+            }
+        }
+
+        fun captureNewScreenshotNow() {
+            isScreenshotLoading = true
+            scope.launch {
+                try {
+                    val captured = bridgeClient?.captureNewScreenshot() ?: emptyList()
+                    if (captured.isNotEmpty()) {
+                        screenshotsList = captured
+                        loadScreenshotAtIndex(0)
+                        Toast.makeText(this@MainActivity, "Nueva captura tomada", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "No se pudo realizar la captura", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Fallo al capturar: ${e.message}", Toast.LENGTH_SHORT).show()
+                } finally {
+                    isScreenshotLoading = false
+                }
+            }
+        }
+
+        fun saveCurrentScreenshotToPhone() {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                    val filename = if (screenshotsList.isNotEmpty() && currentScreenshotIndex in screenshotsList.indices) {
+                        screenshotsList[currentScreenshotIndex].optString("filename", "captura_pc.png")
+                    } else {
+                        "captura_pc_${System.currentTimeMillis()}.png"
+                    }
+                    val destFile = File(downloadsDir, filename)
+                    val query = if (screenshotsList.isNotEmpty() && currentScreenshotIndex in screenshotsList.indices) {
+                        val item = screenshotsList[currentScreenshotIndex]
+                        item.optString("relative_path", item.optString("filename"))
+                    } else filename
+                    val ok = bridgeClient?.downloadPcFile(query, destFile) ?: false
+                    withContext(Dispatchers.Main) {
+                        if (ok) {
+                            Toast.makeText(this@MainActivity, "Guardado en Descargas/$filename", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(this@MainActivity, "No se pudo guardar la captura", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "Error al guardar: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
@@ -435,10 +529,10 @@ class MainActivity : ComponentActivity() {
                             Text("Estado del PC", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(
-                                    onClick = { loadScreenshot() },
+                                    onClick = { openScreenshotsGallery() },
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    Text("Ver Pantalla")
+                                    Text("Capturas")
                                 }
                                 Button(
                                     onClick = { refreshPcStatus() },
@@ -490,25 +584,123 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // ── Modal de Captura de Pantalla del PC ──
-            if (showScreenshotDialog && screenshotBitmap != null) {
+            // ── Modal de Capturas de Pantalla del PC (Historial y Captura) ──
+            if (showScreenshotDialog) {
                 AlertDialog(
                     onDismissRequest = { showScreenshotDialog = false },
-                    title = { Text("Pantalla del PC", fontWeight = FontWeight.Bold) },
+                    title = {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Capturas del PC", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                OutlinedButton(
+                                    onClick = { captureNewScreenshotNow() },
+                                    enabled = !isScreenshotLoading,
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Capturar ahora", fontSize = 11.sp)
+                                }
+                            }
+                            if (screenshotsList.isNotEmpty()) {
+                                val currentItem = screenshotsList.getOrNull(currentScreenshotIndex)
+                                val dateStr = currentItem?.optString("date_str", "") ?: ""
+                                val fname = currentItem?.optString("filename", "") ?: ""
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        "${currentScreenshotIndex + 1} de ${screenshotsList.size}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        dateStr.ifBlank { fname },
+                                        fontSize = 11.sp,
+                                        color = Color(0xFFA6ADC8)
+                                    )
+                                }
+                            }
+                        }
+                    },
                     text = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Image(
-                                bitmap = screenshotBitmap!!,
-                                contentDescription = "Captura de pantalla",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                            )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 180.dp, max = 360.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isScreenshotLoading) {
+                                CircularProgressIndicator()
+                            } else if (currentScreenshotBitmap != null) {
+                                Image(
+                                    bitmap = currentScreenshotBitmap!!,
+                                    contentDescription = "Captura de pantalla",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                )
+                            } else {
+                                Text(
+                                    "No hay capturas disponibles",
+                                    color = Color(0xFFA6ADC8),
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
                     },
                     confirmButton = {
-                        Button(onClick = { showScreenshotDialog = false }) {
-                            Text("Cerrar")
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Button(
+                                        onClick = {
+                                            if (currentScreenshotIndex < screenshotsList.size - 1) {
+                                                loadScreenshotAtIndex(currentScreenshotIndex + 1)
+                                            }
+                                        },
+                                        enabled = !isScreenshotLoading && currentScreenshotIndex < screenshotsList.size - 1,
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("< Anterior", fontSize = 11.sp)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            if (currentScreenshotIndex > 0) {
+                                                loadScreenshotAtIndex(currentScreenshotIndex - 1)
+                                            }
+                                        },
+                                        enabled = !isScreenshotLoading && currentScreenshotIndex > 0,
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("Siguiente >", fontSize = 11.sp)
+                                    }
+                                }
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(
+                                        onClick = { saveCurrentScreenshotToPhone() },
+                                        enabled = currentScreenshotBitmap != null
+                                    ) {
+                                        Text("Guardar", fontSize = 12.sp)
+                                    }
+                                    TextButton(onClick = { showScreenshotDialog = false }) {
+                                        Text("Cerrar", fontSize = 12.sp)
+                                    }
+                                }
+                            }
                         }
                     }
                 )

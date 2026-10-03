@@ -37,8 +37,10 @@ from bridge.pc_ops import (
     capture_screen_bytes,
     execute_pc_action,
     get_clipboard_text,
+    get_pc_screenshots,
     get_system_status,
     resolve_safe_file_path,
+    resolve_screenshot_file,
     set_clipboard_text,
 )
 from bridge.phone_manager import phone_manager
@@ -159,8 +161,41 @@ def pc_status():
 def pc_screenshot():
     """Captura la pantalla actual de Wayland y la devuelve como imagen PNG."""
     try:
-        image_bytes = capture_screen_bytes()
+        image_bytes = capture_screen_bytes(save_history=True)
         return Response(content=image_bytes, media_type="image/png")
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/pc/screenshots", dependencies=[Depends(verify_auth)])
+def pc_screenshots(limit: int = 50):
+    """Retorna historial cronologico de capturas de pantalla disponibles en el PC."""
+    return {"screenshots": get_pc_screenshots(limit=limit)}
+
+
+@app.get("/api/v1/pc/screenshots/file", dependencies=[Depends(verify_auth)])
+def pc_screenshot_file(name: str = Query(..., description="Nombre o ruta relativa de la captura")):
+    """Devuelve el archivo binario de una captura de pantalla especifica del PC."""
+    file_path = resolve_screenshot_file(name)
+    if not file_path or not file_path.exists():
+        raise HTTPException(status_code=404, detail="Captura de pantalla no encontrada.")
+    return FileResponse(
+        path=str(file_path),
+        filename=file_path.name,
+        media_type="image/png",
+    )
+
+
+@app.post("/api/v1/pc/screenshots/capture", dependencies=[Depends(verify_auth)])
+def pc_capture_screenshot():
+    """Toma una nueva captura de pantalla en el PC y la registra en el historial."""
+    try:
+        capture_screen_bytes(save_history=True)
+        return {
+            "success": True,
+            "message": "Captura realizada correctamente.",
+            "screenshots": get_pc_screenshots(limit=50),
+        }
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
