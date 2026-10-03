@@ -27,12 +27,14 @@ PIPER_VERSION="2023.11.14-2"
 WHISPER_MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
 PIPER_MODEL_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/sharvard/medium"
 PIPER_MODEL_NAME="es_ES-sharvard-medium"
+QWEN_MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+QWEN_MODEL_NAME="qwen2.5-0.5b-instruct-q4_k_m.gguf"
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo -e "\n${BOLD}====================================================${NC}"
 echo -e "${BOLD}  Jota -- Setup automatico (Fase 1)${NC}"
 echo -e "${BOLD}====================================================${NC}"
-echo -e "  Modelos → ${MODELS_DIR}"
+echo -e "  Modelos -> ${MODELS_DIR}"
 echo ""
 
 # ── Detección de distro ───────────────────────────────────────────────────────
@@ -45,7 +47,7 @@ fi
 already() { ok "$1 ya está instalado, saltando."; }
 
 # =============================================================================
-step "1/7" "Grupo 'input' (necesario para tecla Copilot sin sudo)"
+step "1/8" "Grupo 'input' (necesario para tecla Copilot sin sudo)"
 # =============================================================================
 if groups | grep -q '\binput\b'; then
     already "Grupo input"
@@ -61,7 +63,7 @@ else
 fi
 
 # =============================================================================
-step "2/7" "Dependencias del sistema (Fedora)"
+step "2/8" "Dependencias del sistema (Fedora)"
 # =============================================================================
 PKGS=(python3-devel portaudio-devel libsndfile-devel cmake make gcc-c++ git curl)
 MISSING=()
@@ -86,7 +88,7 @@ else
 fi
 
 # =============================================================================
-step "3/7" "whisper.cpp → whisper-cli"
+step "3/8" "whisper.cpp -> whisper-cli"
 # =============================================================================
 if [[ -x "$WHISPER_BIN" ]]; then
     already "whisper-cli ($WHISPER_BIN)"
@@ -115,7 +117,7 @@ else
 fi
 
 # =============================================================================
-step "4/7" "Modelo Whisper (ggml-small.bin, ~244 MB)"
+step "4/8" "Modelo Whisper (ggml-small.bin, ~244 MB)"
 # =============================================================================
 mkdir -p "$MODELS_DIR/whisper"
 WHISPER_MODEL="$MODELS_DIR/whisper/ggml-small.bin"
@@ -129,7 +131,7 @@ else
 fi
 
 # =============================================================================
-step "5/7" "piper-tts"
+step "5/8" "piper-tts"
 # =============================================================================
 if command -v piper &>/dev/null || [[ -x "$PIPER_BIN" ]]; then
     already "piper ($(command -v piper || echo "$PIPER_BIN"))"
@@ -161,7 +163,7 @@ else
 fi
 
 # =============================================================================
-step "6/7" "Modelo de voz Piper (español, ~60 MB)"
+step "6/8" "Modelo de voz Piper (español, ~60 MB)"
 # =============================================================================
 mkdir -p "$MODELS_DIR/piper"
 PIPER_ONNX="$MODELS_DIR/piper/${PIPER_MODEL_NAME}.onnx"
@@ -190,7 +192,21 @@ else
 fi
 
 # =============================================================================
-step "7/7" "Entorno Python y dependencias"
+step "7/8" "Modelo LLM Qwen GGUF (~398 MB)"
+# =============================================================================
+mkdir -p "$MODELS_DIR/qwen"
+QWEN_MODEL_FILE="$MODELS_DIR/qwen/$QWEN_MODEL_NAME"
+
+if ls "$MODELS_DIR/qwen"/*.gguf &>/dev/null 2>&1; then
+    already "Modelo Qwen GGUF ($(ls "$MODELS_DIR/qwen"/*.gguf | head -1))"
+else
+    info "Descargando modelo Qwen 2.5 0.5B Instruct GGUF (q4_k_m)..."
+    curl -L "$QWEN_MODEL_URL" -o "$QWEN_MODEL_FILE" --progress-bar
+    ok "Modelo Qwen guardado en $QWEN_MODEL_FILE"
+fi
+
+# =============================================================================
+step "8/8" "Entorno Python y dependencias"
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -203,35 +219,16 @@ else
 fi
 
 info "Instalando dependencias Python..."
-"$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
+"$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip setuptools wheel -q
 "$SCRIPT_DIR/.venv/bin/pip" install -e "$SCRIPT_DIR[dev]" -q
 ok "Dependencias Python instaladas."
 
-# =============================================================================
-# Modelo Qwen (no automatizable sin huggingface-cli o token)
-# =============================================================================
-echo ""
-echo -e "${BOLD}${YELLOW}====================================================${NC}"
-echo -e "${BOLD}${YELLOW}  [!] Paso manual: modelo Qwen GGUF${NC}"
-echo -e "${BOLD}${YELLOW}====================================================${NC}"
-echo ""
-QWEN_DIR="$MODELS_DIR/qwen"
-mkdir -p "$QWEN_DIR"
-
-if ls "$QWEN_DIR"/*.gguf &>/dev/null 2>&1; then
-    ok "Modelo GGUF ya presente en $QWEN_DIR"
+# Smoke test del LLM
+info "Probando carga y respuesta del LLM..."
+if "$SCRIPT_DIR/.venv/bin/python" -c "from jota import llm; llm.load_model(); resp = llm.ask('Di hola'); print('Respuesta LLM:', resp)" 2>/dev/null; then
+    ok "LLM verificado correctamente."
 else
-    warn "No se encontró ningún modelo .gguf en $QWEN_DIR"
-    echo ""
-    echo "  Descárgalo de HuggingFace:"
-    echo "  -> https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF"
-    echo "  Archivo recomendado: qwen2.5-0.5b-instruct-q4_k_m.gguf"
-    echo "  Guárdalo en: $QWEN_DIR/"
-    echo ""
-    echo "  O con huggingface-cli (si lo tienes instalado):"
-    echo "    pip install huggingface_hub"
-    echo "    huggingface-cli download Qwen/Qwen2.5-0.5B-Instruct-GGUF \\"
-    echo "      qwen2.5-0.5b-instruct-q4_k_m.gguf --local-dir $QWEN_DIR"
+    warn "No se pudo completar el test del LLM. Revisa que el modelo GGUF este presente."
 fi
 
 # =============================================================================
@@ -239,14 +236,14 @@ fi
 # =============================================================================
 echo ""
 echo -e "${BOLD}${YELLOW}====================================================${NC}"
-echo -e "${BOLD}${YELLOW}  [!] Paso manual: keycode de la tecla Copilot${NC}"
+echo -e "${BOLD}${YELLOW}  [!] Configuracion de la tecla Copilot${NC}"
 echo -e "${BOLD}${YELLOW}====================================================${NC}"
 echo ""
 echo "  Ejecuta esto para encontrar el scancode de tu tecla:"
 echo "    source .venv/bin/activate"
 echo "    python tools/find_copilot_key.py"
 echo ""
-echo "  Luego edita jota/config.py:"
+echo "  Luego edita jota/config.py si difiere del valor por defecto:"
 echo "    COPILOT_KEY_CODE = 0x???  # tu scancode"
 
 # =============================================================================
@@ -254,10 +251,10 @@ echo "    COPILOT_KEY_CODE = 0x???  # tu scancode"
 # =============================================================================
 echo ""
 echo -e "${BOLD}${GREEN}====================================================${NC}"
-echo -e "${BOLD}${GREEN}  [OK] Setup completado${NC}"
+echo -e "${BOLD}${GREEN}  [OK] Setup completado al 100%${NC}"
 echo -e "${BOLD}${GREEN}====================================================${NC}"
 echo ""
-echo "  Cuando tengas el modelo Qwen y el keycode configurado:"
+echo "  Para iniciar el asistente Jota:"
 echo ""
 echo "    source .venv/bin/activate"
 echo "    jota"

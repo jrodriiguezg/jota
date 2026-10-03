@@ -39,144 +39,42 @@
 
 ## Instalación
 
-### 1. Añadirte al grupo `input`
+### Método Automático (Recomendado)
 
-Necesario para leer la tecla Copilot sin `sudo`:
-
-```bash
-sudo usermod -aG input $USER
-# Cierra sesión y vuelve a entrar para que surta efecto
-```
-
-Verifica que funciona:
-```bash
-groups | grep input
-```
-
----
-
-### 2. Dependencias del sistema (Fedora)
+Ejecuta el script incluido. Se encarga de todo:
+- Verifica e instala paquetes de sistema necesarios
+- Compila `whisper-cli`
+- Descarga el modelo Whisper `ggml-small.bin`
+- Instala `piper-tts` en espacio de usuario (`~/.local/share/jota/piper`)
+- Descarga el modelo de voz en español (`es_ES-sharvard-medium.onnx`)
+- Descarga el modelo LLM `qwen2.5-0.5b-instruct-q4_k_m.gguf`
+- Crea el entorno virtual e instala dependencias Python
+- Ejecuta pruebas automáticas de síntesis y respuesta del LLM
 
 ```bash
-sudo dnf install -y \
-    portaudio-devel \
-    libsndfile-devel \
-    cmake make gcc-c++ git curl
-```
-
----
-
-### 3. Compilar whisper.cpp
-
-```bash
-git clone --depth 1 https://github.com/ggerganov/whisper.cpp /tmp/whisper-build
-cmake -B /tmp/whisper-build/build -S /tmp/whisper-build -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/whisper-build/build --config Release -j$(nproc)
-sudo install -m 755 /tmp/whisper-build/build/bin/whisper-cpp /usr/local/bin/whisper-cpp
-```
-
-Verificar:
-```bash
-whisper-cpp --help
-```
-
----
-
-### 4. Descargar modelo de Whisper
-
-```bash
-mkdir -p ~/.local/share/jota/models/whisper
-curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin" \
-     -o ~/.local/share/jota/models/whisper/ggml-small.bin \
-     --progress-bar
-```
-
-> **Nota:** El modelo `small` (~244 MB) es suficiente para comandos en español.
-> Si tienes más RAM puedes usar `ggml-medium.bin` para mejor precisión.
-
-Modelos disponibles: https://huggingface.co/ggerganov/whisper.cpp
-
----
-
-### 5. Instalar piper-tts
-
-```bash
-# Descarga el binario precompilado para Linux x86_64
-PIPER_VER="2023.11.14-2"
-curl -L "https://github.com/rhasspy/piper/releases/download/${PIPER_VER}/piper_linux_amd64.tar.gz" \
-     -o /tmp/piper.tar.gz --progress-bar
-tar -xzf /tmp/piper.tar.gz -C /tmp/
-sudo install -m 755 /tmp/piper/piper /usr/bin/piper
-```
-
-Verificar:
-```bash
-piper --help
-```
-
----
-
-### 6. Descargar modelo de voz Piper (español)
-
-```bash
-mkdir -p ~/.local/share/jota/models/piper
-
-# Voz: es_ES-sharvard-medium (español neutro, buena calidad)
-BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/sharvard/medium"
-curl -L "${BASE}/es_ES-sharvard-medium.onnx" \
-     -o ~/.local/share/jota/models/piper/es_ES-sharvard-medium.onnx --progress-bar
-curl -L "${BASE}/es_ES-sharvard-medium.onnx.json" \
-     -o ~/.local/share/jota/models/piper/es_ES-sharvard-medium.onnx.json --progress-bar
-```
-
-Probar que funciona:
-```bash
-echo "Hola, soy Jota, tu asistente de voz." | piper \
-    --model ~/.local/share/jota/models/piper/es_ES-sharvard-medium.onnx \
-    --output_file /tmp/test.wav && aplay /tmp/test.wav
-```
-
-Otros modelos de voz en español: https://huggingface.co/rhasspy/piper-voices/tree/main/es
-
----
-
-### 7. Descargar modelo Qwen GGUF
-
-El modelo LLM hay que descargarlo manualmente de HuggingFace:
-
-```bash
-mkdir -p ~/.local/share/jota/models/qwen
-```
-
-Ve a: https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF
-
-Descarga el archivo `qwen2.5-0.5b-instruct-q4_k_m.gguf` y ponlo en:
-```
-~/.local/share/jota/models/qwen/
-```
-
-> **¿Por qué Qwen2.5-0.5B y no 3.5-0.8B?**
-> Qwen3.5:0.8b aún no tiene GGUF oficial en HuggingFace al momento de escribir esto.
-> El 2.5-0.5B es el más cercano en tamaño y también usa formato ChatML.
-> Actualiza `LLM_MODEL` en `jota/config.py` con el nombre exacto del archivo que descargues.
-
----
-
-### 8. Entorno Python
-
-```bash
-# Clona el repo si aún no lo tienes
-git clone https://git.jrodriiguezg.link/jrodriiguezg/jota.git
+git clone git@github.com:jrodriiguezg/jota.git
 cd jota
-
-# Crea el entorno virtual
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Instala el proyecto y sus dependencias
-pip install --upgrade pip
-pip install -e ".[dev]"
+bash setup.sh
 ```
+
+---
+
+### Configuración de la Tecla Copilot (Push-to-Talk)
+
+Para encontrar el scancode de tu teclado:
+
+```bash
+source .venv/bin/activate
+python tools/find_copilot_key.py
+```
+
+Pulsa la tecla Copilot y anota el código (ejemplo: `0x1d8` o el que aparezca en pantalla). Luego verifica en `jota/config.py`:
+
+```python
+COPILOT_KEY_CODE = 0x1D8  # actualiza si tu teclado usa otro valor
+```
+
+> **Permisos de teclado**: Si no estás en el grupo `input`, ejecuta una vez `sudo usermod -aG input $USER` y cierra sesión para activar el permiso de lectura de eventos de teclado.
 
 ---
 

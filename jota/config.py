@@ -19,7 +19,9 @@ WHISPER_MODEL = MODELS_DIR / "whisper" / "ggml-small.bin"
 WHISPER_LANG = "es"
 
 # LLM: modelo GGUF de Qwen
-LLM_MODEL = MODELS_DIR / "qwen" / "qwen3.5-0.8b-q4_k_m.gguf"
+_default_qwen = MODELS_DIR / "qwen" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+_found_ggufs = list((MODELS_DIR / "qwen").glob("*.gguf")) if (MODELS_DIR / "qwen").exists() else []
+LLM_MODEL = _found_ggufs[0] if _found_ggufs else _default_qwen
 LLM_N_CTX = 2048          # contexto de tokens
 LLM_N_GPU_LAYERS = 0       # 0 = sólo CPU; -1 = todo en GPU si tienes CUDA/Vulkan
 LLM_TEMPERATURE = 0.7
