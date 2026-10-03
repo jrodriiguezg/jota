@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from jota.tools.apps import _clean_app_query, launch_application, resolve_app_target
 from jota.tools.media import playback_control, set_volume, toggle_mute
 from jota.tools.router import (
+    execute_tool,
     match_fast_intent,
     parse_llm_tool_call,
 )
@@ -227,3 +228,42 @@ class TestToolExecution:
         args = mock_popen.call_args[0][0]
         assert "firefox" in args[0]
         assert "google.com/search?q=" in args[1]
+
+
+class TestSystemTools:
+    """Verifica el enrutamiento y ejecucion de herramientas del sistema."""
+
+    def test_parse_system_tools(self):
+        assert parse_llm_tool_call("TOOL: lock_pc()") == ("lock_pc", {})
+        assert parse_llm_tool_call("TOOL: system_power(action='suspend')") == (
+            "system_power",
+            {"action": "suspend"},
+        )
+        assert parse_llm_tool_call("TOOL: close_active_window()") == (
+            "close_active_window",
+            {},
+        )
+        assert parse_llm_tool_call(
+            "TOOL: send_notification(title='Jota', message='hola')"
+        ) == ("send_notification", {"title": "Jota", "message": "hola"})
+        assert parse_llm_tool_call("TOOL: pc_summary()") == ("pc_summary", {})
+
+    @patch("jota.tools.system.subprocess.Popen")
+    def test_execute_system_tools(self, mock_popen):
+        ok, msg = execute_tool("lock_pc", {})
+        assert ok is True
+        assert "bloqueada" in msg
+
+        ok, msg = execute_tool("system_power", {"action": "suspend"})
+        assert ok is True
+        assert "Suspendiendo" in msg
+
+        ok, msg = execute_tool("send_notification", {"title": "Test", "message": "Msg"})
+        assert ok is True
+        assert "Notificacion" in msg
+
+    def test_pc_summary_execution(self):
+        ok, msg = execute_tool("pc_summary", {})
+        assert ok is True
+        assert "CPU" in msg
+

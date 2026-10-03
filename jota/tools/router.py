@@ -211,6 +211,39 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         value = args.get("value") or args.get("text") or args.get("url", "")
         return "phone_control", {"action": action, "value": value}
 
+    # 9. Control de sesion y energia del PC
+    if norm_name in ("lockpc", "lockscreen", "bloquearpc"):
+        return "lock_pc", {}
+
+    if norm_name in ("systempower", "powercontrol", "energiacontrol"):
+        action = args.get("action", "suspend")
+        return "system_power", {"action": action}
+
+    # 10. Gestion de ventanas
+    if norm_name in (
+        "closewindow",
+        "closeactivewindow",
+        "killwindow",
+        "cerrarventana",
+        "cerrarventanactiva",
+    ):
+        return "close_active_window", {}
+
+    # 11. Notificaciones de escritorio
+    if norm_name in (
+        "sendnotification",
+        "senddesktopnotification",
+        "desktopnotification",
+        "notificacion",
+    ):
+        title = args.get("title", "Jota")
+        message = args.get("message") or args.get("text", "")
+        return "send_notification", {"title": title, "message": message}
+
+    # 12. Resumen del estado del PC
+    if norm_name in ("pcsummary", "pcstatus", "estadopc", "systemsummary"):
+        return "pc_summary", {}
+
     return None
 
 
@@ -248,5 +281,29 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         value = args.get("value", "")
         msg = phone_control(action, value)
         return True, msg
+
+    if tool_name == "lock_pc":
+        from jota.tools.system import lock_pc
+        return lock_pc()
+
+    if tool_name == "system_power":
+        from jota.tools.system import system_power
+        action = args.get("action", "suspend")
+        return system_power(action)
+
+    if tool_name == "close_active_window":
+        from jota.tools.system import close_active_window
+        return close_active_window()
+
+    if tool_name == "send_notification":
+        from jota.tools.system import send_desktop_notification
+        return send_desktop_notification(
+            args.get("title", "Jota"),
+            args.get("message", "Aviso"),
+        )
+
+    if tool_name == "pc_summary":
+        from jota.tools.system import get_pc_summary
+        return get_pc_summary()
 
     return False, f"Herramienta no implementada: {tool_name}"
