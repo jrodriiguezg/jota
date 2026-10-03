@@ -69,9 +69,65 @@ AUDIO_TMP_FILE = AUDIO_TMP_DIR / "input.wav"
 COPILOT_KEY_CODE = 0x00C1
 COPILOT_KEY_CODES = {0x00C1, 0x1D8, 193, 472}
 
+# ── Herramientas (Fase 2) ────────────────────────────────────────────────────
+
+VOLUME_STEP_PERCENT = 5
+BROWSER_BIN = "firefox"
+WEB_SEARCH_URL = "https://www.google.com/search?q="
+
+# Tipos de aplicaciones estandar asignados a MIME types o comandos
+DEFAULT_MIME_TYPES = {
+    "explorador_archivos": "inode/directory",
+    "navegador": "x-scheme-handler/https",
+    "editor_texto": "text/plain",
+}
+
+# Aplicaciones preferidas personalizadas por el usuario
+CUSTOM_APP_MAPPINGS = {
+    "musica": "org.jeffvli.feishin",
+    "reproductor_musica": "org.jeffvli.feishin",
+    "reproductor_multimedia": "org.jeffvli.feishin",
+}
+
+# Variantes y alias comunes en lenguaje natural mapeados a nombres de app o mimes
+APP_ALIASES = {
+    # Explorador de archivos
+    "explorador de archivos": "inode/directory",
+    "explorador": "inode/directory",
+    "gestor de archivos": "inode/directory",
+    "archivos": "inode/directory",
+    "carpetas": "inode/directory",
+    "dolphin": "org.kde.dolphin",
+    # Musica y multimedia
+    "reproductor de musica": "org.jeffvli.feishin",
+    "reproductor multimedia": "org.jeffvli.feishin",
+    "reproductor de audio": "org.jeffvli.feishin",
+    "reproductor": "org.jeffvli.feishin",
+    "musica": "org.jeffvli.feishin",
+    "feishin": "org.jeffvli.feishin",
+    "feisfin": "org.jeffvli.feishin",
+    # Navegadores
+    "navegador": "firefox",
+    "navegador web": "firefox",
+    "firefox": "firefox",
+    "google chrome": "google-chrome",
+    "chromium": "chromium",
+    # Terminal
+    "terminal": "kitty",
+    "consola": "kitty",
+    "kitty": "kitty",
+    "konsole": "konsole",
+}
+
 # ── Sistema prompt del LLM ───────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """Eres Jota, un asistente de voz local conciso y útil.
-Responde siempre en español, de forma breve y directa.
+SYSTEM_PROMPT = """Eres Jota, un asistente de voz local para Linux conciso y util.
+Responde siempre en espanol, de forma breve y directa.
 No uses markdown, listas con asteriscos ni emojis: tus respuestas se leen en voz alta.
-Máximo 3 frases por respuesta salvo que se te pida más detalle."""
+Si el usuario te pide una accion del sistema, incluye la instruccion TOOL correspondiente:
+- TOOL: volume_control(action='up'|'down'|'mute')
+- TOOL: media_control(action='play'|'pause'|'play_pause'|'next'|'previous')
+- TOOL: screenshot()
+- TOOL: open_app(name='...')
+- TOOL: web_search(query='...')
+Maximo 3 frases por respuesta salvo que se te pida mas detalle."""
