@@ -77,23 +77,23 @@ def strip_wake_word(text: str) -> str | None:
     Elimina el wake word del inicio de la frase.
     Ejemplos:
         "Jota, ¿cómo estás?"   → "¿cómo estás?"
+        "¡Jota! qué hora es"   → "qué hora es"
         "Hota qué hora es"      → "qué hora es"
         "Cómo estás"            → None  (sin wake word detectado)
 
     Devuelve el texto limpio o None si no se detectó ningún wake word.
     """
-    normalized = text.strip().lower()
+    cleaned_start = re.sub(r"^[\s¡¿\"']+", "", text)
+    normalized = cleaned_start.strip().lower()
 
     for word in WAKE_WORDS:
-        # La palabra puede ir seguida de coma, punto, espacio, o nada más
-        pattern = rf"^{re.escape(word)}[\s,\.!¿?]*"
+        pattern = rf"^{re.escape(word)}[\s,\.!¿?¡\"']*"
         match = re.match(pattern, normalized)
         if match:
-            cleaned = text[match.end():].strip()
-            # Quitar puntuación inicial residual
-            cleaned = re.sub(r"^[\s,\.!¿?]+", "", cleaned)
+            cleaned = cleaned_start[match.end():].strip()
+            cleaned = re.sub(r"^[\s,\.!¿?¡\"']+", "", cleaned)
             logger.debug("Wake word '%s' detectado. Frase limpia: %r", word, cleaned)
-            return cleaned if cleaned else None  # no pasar frase vacía
+            return cleaned if cleaned else None
 
     logger.debug("No se detectó wake word en: %r", text)
     return None
