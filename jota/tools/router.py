@@ -11,14 +11,36 @@ from jota.tools.search import open_web_search
 logger = logging.getLogger(__name__)
 
 
+def normalize_speech_command(text: str) -> str:
+    """
+    Normaliza el texto corrigiendo confusiones foneticas comunes de Whisper en espanol.
+    Ejemplos:
+      - 'habla terminal' -> 'abre terminal'
+      - 'a ver a terminar' -> 'abre terminal'
+      - 'abre feisfin' -> 'abre feishin'
+      - 'abre dolfin' -> 'abre dolphin'
+    """
+    clean = text.lower().strip()
+    clean = re.sub(r"^[¿¡\s]+|[?!.,\s]+$", "", clean)
+
+    # Confusiones de verbos de apertura
+    clean = re.sub(r"^(por favor\s+|puedes\s+)?(habla|hablar|habre)\s+", r"\1abre ", clean)
+    clean = re.sub(r"^(por favor\s+|puedes\s+)?(a\s+ver\s+(a\s+)?|haber\s+)", r"\1abre ", clean)
+
+    # Confusiones de nombres comunes de apps
+    clean = re.sub(r"\b(terminar|terminado)\b", "terminal", clean)
+    clean = re.sub(r"\bfeisfin\b", "feishin", clean)
+    clean = re.sub(r"\bdolfin\b", "dolphin", clean)
+
+    return clean
+
+
 def match_fast_intent(text: str) -> tuple[str, dict] | None:
     """
     Evalua el texto del usuario con reglas de intencion inmediata.
     Si coincide, devuelve (tool_name, kwargs) para ejecucion instantanea sin esperar al LLM.
     """
-    clean = text.lower().strip()
-    # Quitar signos de puntuacion iniciales/finales
-    clean = re.sub(r"^[¿¡\s]+|[?!.,\s]+$", "", clean)
+    clean = normalize_speech_command(text)
 
     # 1. Captura de pantalla
     if re.search(
@@ -97,7 +119,9 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
 
     # 5. Abrir aplicaciones
     open_app_match = re.search(
-        r"^(por\s+favor\s+|puedes\s+)?(abre|abrir|lanza|lanzar|ejecuta|ejecutar)\s+(el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(.+)$",
+        r"^(por\s+favor\s+|puedes\s+)?"
+        r"(abre|abrir|lanza|lanzar|ejecuta|ejecutar|inicia|iniciar|pon|arranca|arrancar)\s+"
+        r"(el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?(.+)$",
         clean,
     )
     if open_app_match:
@@ -110,12 +134,14 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
 def parse_llm_tool_call(llm_output: str) -> tuple[str, dict] | None:
     """
     Analiza la respuesta del LLM buscando directivas TOOL: nombre(argumentos).
+    Tolera nombres de herramientas con y sin guion bajo.
     """
     match = re.search(r"TOOL:\s*([a-zA-Z0-9_]+)\((.*?)\)", llm_output)
     if not match:
         return None
 
-    tool_name = match.group(1).strip()
+    raw_tool_name = match.group(1).strip()
+    norm_name = raw_tool_name.lower().replace("_", "")
     args_str = match.group(2).strip()
     args: dict = {}
 
@@ -124,7 +150,7 @@ def parse_llm_tool_call(llm_output: str) -> tuple[str, dict] | None:
     for k, v in arg_matches:
         args[k] = v
 
-    if tool_name in ("volume_control", "set_volume"):
+    if norm_name in ("volumecontrol", "setvolume"):
         action = args.get("action", "")
         direction = args.get("direction", "")
         if action == "mute":
@@ -135,18 +161,18 @@ def parse_llm_tool_call(llm_output: str) -> tuple[str, dict] | None:
             return "volume_control", {"direction": direction}
         return "volume_control", {"direction": "up"}
 
-    if tool_name in ("media_control", "playback_control"):
+    if norm_name in ("mediacontrol", "playbackcontrol"):
         action = args.get("action", "play_pause")
         return "media_control", {"action": action}
 
-    if tool_name in ("screenshot", "take_screenshot"):
+    if norm_name in ("screenshot", "takescreenshot"):
         return "screenshot", {}
 
-    if tool_name in ("open_app", "launch_app"):
+    if norm_name in ("openapp", "launchapp"):
         name = args.get("name") or args.get("app_name") or args.get("target", "")
         return "open_app", {"name": name}
 
-    if tool_name in ("web_search", "search_web"):
+    if norm_name in ("websearch", "searchweb"):
         query = args.get("query", "")
         return "web_search", {"query": query}
 

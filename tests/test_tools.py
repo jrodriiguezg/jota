@@ -66,7 +66,16 @@ class TestFastIntentRouter:
             {"name": "reproductor de musica"},
         )
         assert match_fast_intent("abre feishin") == ("open_app", {"name": "feishin"})
-        assert match_fast_intent("abre feisfin") == ("open_app", {"name": "feisfin"})
+        assert match_fast_intent("abre feisfin") == ("open_app", {"name": "feishin"})
+
+    def test_phonetic_stt_normalizations(self):
+        # Confusiones foneticas habituales de Whisper
+        # ("habla" o "a ver" por "abre", "terminar" por "terminal")
+        assert match_fast_intent("habla terminal") == ("open_app", {"name": "terminal"})
+        assert match_fast_intent("habla la terminal") == ("open_app", {"name": "terminal"})
+        assert match_fast_intent("a ver a terminar") == ("open_app", {"name": "terminal"})
+        assert match_fast_intent("a ver la terminal") == ("open_app", {"name": "terminal"})
+        assert match_fast_intent("abre dolfin") == ("open_app", {"name": "dolphin"})
 
     def test_non_tool_intent_returns_none(self):
         assert match_fast_intent("como estas hoy") is None
@@ -84,9 +93,16 @@ class TestLLMToolParser:
         out2 = "TOOL: volume_control(action='mute')"
         assert parse_llm_tool_call(out2) == ("volume_control", {"action": "mute"})
 
+        # Tolerar salida de Qwen sin guion bajo (volumecontrol)
+        out3 = "TOOL: volumecontrol(action='up')"
+        assert parse_llm_tool_call(out3) == ("volume_control", {"direction": "up"})
+
     def test_parse_media(self):
         out = "TOOL: media_control(action='next')"
         assert parse_llm_tool_call(out) == ("media_control", {"action": "next"})
+
+        out2 = "TOOL: mediacontrol(action='pause')"
+        assert parse_llm_tool_call(out2) == ("media_control", {"action": "pause"})
 
     def test_parse_screenshot(self):
         out = "TOOL: screenshot()"
@@ -96,8 +112,15 @@ class TestLLMToolParser:
         out = "TOOL: open_app(name='dolphin')"
         assert parse_llm_tool_call(out) == ("open_app", {"name": "dolphin"})
 
+        out2 = "TOOL: openapp(name='terminal')"
+        assert parse_llm_tool_call(out2) == ("open_app", {"name": "terminal"})
+
     def test_parse_web_search(self):
         out = "TOOL: web_search(query='que es una vaca')"
+        assert parse_llm_tool_call(out) == ("web_search", {"query": "que es una vaca"})
+
+        out2 = "TOOL: websearch(query='que es una vaca')"
+        assert parse_llm_tool_call(out2) == ("web_search", {"query": "que es una vaca"})
         assert parse_llm_tool_call(out) == ("web_search", {"query": "que es una vaca"})
 
     def test_parse_no_tool(self):
