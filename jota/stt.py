@@ -18,13 +18,14 @@ def transcribe(audio_path: Path) -> str | None:
     """
     if not WHISPER_BIN.exists():
         raise FileNotFoundError(
-            f"Binario de whisper.cpp no encontrado en {WHISPER_BIN}.\n"
-            "Compílalo desde https://github.com/ggerganov/whisper.cpp y ajusta WHISPER_BIN en config.py"
+            f"Binario de whisper-cli no encontrado en {WHISPER_BIN}.\n"
+            "Instálalo con:\n"
+            "  sudo install -m 755 /tmp/whisper-build/build/bin/whisper-cli /usr/local/bin/whisper-cli"
         )
     if not WHISPER_MODEL.exists():
         raise FileNotFoundError(
             f"Modelo de whisper no encontrado en {WHISPER_MODEL}.\n"
-            "Descárgalo con: bash models/download-ggml-model.sh small"
+            "Descárgalo desde https://huggingface.co/ggerganov/whisper.cpp"
         )
 
     cmd = [
@@ -33,7 +34,7 @@ def transcribe(audio_path: Path) -> str | None:
         "-f", str(audio_path),
         "-l", WHISPER_LANG,
         "--no-timestamps",
-        "-otxt",  # salida a archivo .txt en el mismo dir que el audio
+        "-otxt",  # salida a archivo .txt
         "-of", str(audio_path.with_suffix("")),  # prefijo del archivo de salida
     ]
 
