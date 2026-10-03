@@ -211,6 +211,26 @@ Usuario: envia al movil este enlace https://google.com
 TOOL: phone_control(action='open_url', value='https://google.com')
 Enviando el enlace a tu telefono.
 
+Usuario: bloquea el pc
+TOOL: lock_pc()
+Bloqueando el PC.
+
+Usuario: suspende el equipo
+TOOL: system_power(action='suspend')
+Suspendiendo el equipo.
+
+Usuario: cierra la ventana
+TOOL: close_active_window()
+Cerrando ventana.
+
+Usuario: como esta el pc
+TOOL: pc_summary()
+Consultando el estado del equipo.
+
+Usuario: manda una notificacion con el texto hola mundo
+TOOL: send_notification(title='Jota', message='hola mundo')
+Enviando notificacion al escritorio.
+
 Usuario: hola como estas
 Hola, estoy listo para ayudarte.
 
