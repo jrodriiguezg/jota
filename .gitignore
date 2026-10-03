@@ -1,0 +1,37 @@
+# Entorno virtual Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Archivos temporales de audio
+/tmp/jota_*.wav
+*.wav
+
+# Modelos (demasiado grandes para git)
+*.gguf
+*.bin
+*.onnx
+*.onnx.json
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ruff
+.ruff_cache/
