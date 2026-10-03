@@ -6,9 +6,11 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import org.json.JSONObject
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -166,6 +168,35 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        fun playAudioResponse(resp: JSONObject?) {
+            if (resp == null) return
+            val audioB64 = resp.optString("audio_base64", "")
+            if (audioB64.isNotEmpty()) {
+                scope.launch {
+                    try {
+                        val audioBytes = Base64.decode(audioB64, Base64.DEFAULT)
+                        audioHelper.playAudio(audioBytes)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            } else {
+                val audioId = resp.optString("audio_id", "")
+                if (audioId.isNotEmpty()) {
+                    scope.launch {
+                        try {
+                            val audioBytes = bridgeClient?.downloadAudio(audioId)
+                            if (audioBytes != null && audioBytes.isNotEmpty()) {
+                                audioHelper.playAudio(audioBytes)
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+            }
+        }
+
         Scaffold(
             topBar = {
                 TopAppBar(
@@ -286,6 +317,7 @@ class MainActivity : ComponentActivity() {
                                                     replyText = resp?.optString("response_text", "Sin respuesta") ?: ""
                                                     isOnline = true
                                                     refreshPcStatus()
+                                                    playAudioResponse(resp)
                                                 } catch (e: Exception) {
                                                     replyText = "Fallo de conexion: ${e.message}"
                                                     isOnline = false
@@ -324,10 +356,11 @@ class MainActivity : ComponentActivity() {
                                             try {
                                                 lastPromptText = prompt
                                                 replyText = "Consultando a Jota..."
-                                                val resp = bridgeClient?.askText(prompt)
+                                                val resp = bridgeClient?.askText(prompt, generateAudio = true, playOnPc = true)
                                                 replyText = resp?.optString("response_text", "") ?: ""
                                                 isOnline = true
                                                 refreshPcStatus()
+                                                playAudioResponse(resp)
                                             } catch (e: Exception) {
                                                 replyText = "Error: ${e.message}"
                                             }

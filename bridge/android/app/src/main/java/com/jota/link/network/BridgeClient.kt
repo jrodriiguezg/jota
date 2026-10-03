@@ -101,10 +101,15 @@ class BridgeClient(
         webSocket?.send(payload.toString())
     }
 
-    suspend fun askVoice(wavAudioBytes: ByteArray, generateAudio: Boolean = true): JSONObject = withContext(Dispatchers.IO) {
+    suspend fun askVoice(
+        wavAudioBytes: ByteArray,
+        generateAudio: Boolean = true,
+        playOnPc: Boolean = true
+    ): JSONObject = withContext(Dispatchers.IO) {
         val requestBody = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("generate_audio", generateAudio.toString())
+            .addFormDataPart("play_on_pc", playOnPc.toString())
             .addFormDataPart(
                 "file",
                 "voice.wav",
@@ -123,10 +128,15 @@ class BridgeClient(
         JSONObject(bodyStr)
     }
 
-    suspend fun askText(prompt: String): JSONObject = withContext(Dispatchers.IO) {
+    suspend fun askText(
+        prompt: String,
+        generateAudio: Boolean = true,
+        playOnPc: Boolean = true
+    ): JSONObject = withContext(Dispatchers.IO) {
         val json = JSONObject().apply {
             put("prompt", prompt)
-            put("generate_audio", false)
+            put("generate_audio", generateAudio)
+            put("play_on_pc", playOnPc)
         }
         val request = Request.Builder()
             .url("$baseUrl/api/v1/text/ask")
@@ -137,6 +147,17 @@ class BridgeClient(
         val response = httpClient.newCall(request).execute()
         val bodyStr = response.body?.string() ?: "{}"
         JSONObject(bodyStr)
+    }
+
+    suspend fun downloadAudio(audioId: String): ByteArray = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/api/v1/audio/$audioId")
+            .header("X-Bridge-Key", apiKey)
+            .get()
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        response.body?.bytes() ?: ByteArray(0)
     }
 
     suspend fun executePcAction(action: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
