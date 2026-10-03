@@ -40,3 +40,16 @@ def test_get_effective_system_prompt(monkeypatch):
     assert prompt_think.endswith("/think")
 
 
+def test_clean_text_strips_tool_lines():
+    raw = "TOOL: volume_control(action='up')\nSubo el volumen enseguida."
+    cleaned = clean_text_for_tts(raw)
+    assert "TOOL:" not in cleaned
+    assert "volume_control" not in cleaned
+    assert cleaned == "Subo el volumen enseguida."
+
+    # Si solo habia la linea TOOL, debe quedar vacio
+    only_tool = "TOOL: volumecontrol(action='up')"
+    assert clean_text_for_tts(only_tool) == ""
+
+
+

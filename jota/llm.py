@@ -83,20 +83,28 @@ def ask(prompt: str) -> str:
     )
 
     raw_text: str = response["choices"][0]["message"]["content"].strip()
-    cleaned = clean_text_for_tts(raw_text)
-    logger.info("Respuesta LLM: %r", cleaned)
-    return cleaned
+    # Eliminar bloques <think> de Qwen3 preservando posibles directivas de herramientas
+    raw_text = re.sub(r"<think>[\s\S]*?</think>", "", raw_text)
+    if "<think>" in raw_text:
+        raw_text = re.sub(r"<think>[\s\S]*$", "", raw_text)
+    raw_text = raw_text.strip()
+
+    logger.info("Respuesta LLM: %r", raw_text)
+    return raw_text
 
 
 def clean_text_for_tts(text: str) -> str:
     """
-    Limpia simbolos de markdown, bloques de razonamiento (<think>) y
-    caracteres no hablados para que el motor TTS hable de forma natural.
+    Limpia simbolos de markdown, bloques de razonamiento (<think>),
+    directivas TOOL: y caracteres no hablados para que el motor TTS hable de forma natural.
     """
     # Eliminar bloques de razonamiento interno de Qwen3 (<think>...</think>)
     text = re.sub(r"<think>[\s\S]*?</think>", "", text)
     if "<think>" in text:
         text = re.sub(r"<think>[\s\S]*$", "", text)
+
+    # Eliminar directivas TOOL: para que el motor TTS nunca las lea en voz alta
+    text = re.sub(r"TOOL:\s*.*$", "", text, flags=re.MULTILINE)
 
     # Eliminar bloques de codigo
     text = re.sub(r"```[\s\S]*?```", "", text)

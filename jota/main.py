@@ -119,8 +119,12 @@ def _do_process() -> None:
             return
 
         # 7. Sintetizar y reproducir respuesta conversacional del LLM
-        logger.info("Respondiendo: %r", response)
-        tts.speak(response)
+        clean_response = llm.clean_text_for_tts(response)
+        if clean_response:
+            logger.info("Respondiendo: %r", clean_response)
+            tts.speak(clean_response)
+        else:
+            logger.info("Respuesta vacia tras limpieza para TTS.")
 
     finally:
         # Limpieza de archivo de audio temporal por privacidad y espacio
