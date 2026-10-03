@@ -3,6 +3,7 @@ Configuración central de Jota.
 Edita aquí las rutas a los modelos y preferencias.
 """
 
+import os
 import shutil
 from pathlib import Path
 
@@ -13,10 +14,11 @@ MODELS_DIR = Path.home() / ".local" / "share" / "jota" / "models"
 
 # Whisper: ruta al binario de whisper.cpp
 # Nota: en versiones recientes el binario se llama whisper-cli (antes whisper-cpp)
-WHISPER_BIN = Path(
-    shutil.which("whisper-cli")
-    or (Path.home() / ".local" / "bin" / "whisper-cli")
-    or "/usr/local/bin/whisper-cli"
+_local_whisper = Path.home() / ".local" / "bin" / "whisper-cli"
+WHISPER_BIN = (
+    _local_whisper
+    if _local_whisper.is_file() and os.access(_local_whisper, os.X_OK)
+    else Path(shutil.which("whisper-cli") or "/usr/local/bin/whisper-cli")
 )
 # Modelo de whisper a usar (small es suficiente para comandos en español)
 WHISPER_MODEL = MODELS_DIR / "whisper" / "ggml-small.bin"
