@@ -50,6 +50,10 @@ PIPER_MODEL = MODELS_DIR / "piper" / "es_ES-sharvard-medium.onnx"
 # Se eliminan del inicio de la frase antes de pasar al LLM.
 WAKE_WORDS = ["jota", "hota", "j"]  # Whisper transcribe frecuentemente 'J' a secas
 
+# En modo push-to-talk (tecla Copilot), no es necesario decir la wake word.
+# La wake word se reserva para activacion manos libres (sin teclas).
+REQUIRE_WAKE_WORD = False
+
 # ── Audio ────────────────────────────────────────────────────────────────────
 
 AUDIO_SAMPLE_RATE = 16000   # Hz (whisper.cpp espera 16kHz)

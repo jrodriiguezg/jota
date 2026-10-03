@@ -4,7 +4,7 @@ from jota.stt import strip_wake_word
 
 
 class TestStripWakeWord:
-    """Prueba la detección y limpieza del wake word."""
+    """Prueba la deteccion y limpieza del wake word."""
 
     def test_jota_simple(self):
         assert strip_wake_word("Jota qué hora es") == "qué hora es"
@@ -19,13 +19,23 @@ class TestStripWakeWord:
         """Whisper a veces transcribe 'Jota' como 'Hota'."""
         assert strip_wake_word("Hota cuéntame algo") == "cuéntame algo"
 
-    def test_sin_wake_word(self):
-        """Sin wake word → None (no responder)."""
-        assert strip_wake_word("Cómo estás") is None
+    def test_push_to_talk_sin_wake_word(self):
+        """En modo push-to-talk (require_wake_word=False), no se exige wake word."""
+        assert strip_wake_word("Cómo estás", require_wake_word=False) == "Cómo estás"
+        assert strip_wake_word("abre una terminal", require_wake_word=False) == "abre una terminal"
+        assert strip_wake_word("¿qué hora es?", require_wake_word=False) == "qué hora es?"
+
+    def test_modo_estricto_sin_wake_word(self):
+        """En modo estricto (require_wake_word=True), se ignora la frase sin wake word."""
+        assert strip_wake_word("Cómo estás", require_wake_word=True) is None
+        assert strip_wake_word("Juegos de mesa", require_wake_word=True) is None
+        assert strip_wake_word("Jamás digas nunca", require_wake_word=True) is None
 
     def test_solo_wake_word(self):
-        """Sólo el wake word → None (frase vacía)."""
+        """Solo el wake word -> None (frase vacia)."""
         assert strip_wake_word("Jota") is None
+        assert strip_wake_word("J") is None
+        assert strip_wake_word("J,") is None
 
     def test_wake_word_con_signos(self):
         assert strip_wake_word("¡Jota! pon un temporizador") == "pon un temporizador"
@@ -37,12 +47,3 @@ class TestStripWakeWord:
     def test_j_letra_simple(self):
         assert strip_wake_word("J qué hora es") == "qué hora es"
 
-    def test_j_no_confunde_palabras(self):
-        """Palabras que empiezan por J no deben activar el asistente."""
-        assert strip_wake_word("Juegos de mesa") is None
-        assert strip_wake_word("Jamás digas nunca") is None
-
-    def test_solo_letra_j(self):
-        """Decir solo 'J' sin petición no debe procesarse."""
-        assert strip_wake_word("J") is None
-        assert strip_wake_word("J,") is None
