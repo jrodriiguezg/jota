@@ -133,16 +133,16 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
 
 def parse_llm_tool_call(llm_output: str) -> tuple[str, dict] | None:
     """
-    Analiza la respuesta del LLM buscando directivas TOOL: nombre(argumentos).
-    Tolera nombres de herramientas con y sin guion bajo.
+    Analiza la respuesta del LLM buscando directivas TOOL: nombre(argumentos) o TOOL: nombre.
+    Tolera nombres de herramientas con y sin guion bajo, nombres directos de aplicacion, etc.
     """
-    match = re.search(r"TOOL:\s*([a-zA-Z0-9_]+)\((.*?)\)", llm_output)
+    match = re.search(r"TOOL:\s*([a-zA-Z0-9_]+)(?:\((.*?)\))?", llm_output)
     if not match:
         return None
 
     raw_tool_name = match.group(1).strip()
     norm_name = raw_tool_name.lower().replace("_", "")
-    args_str = match.group(2).strip()
+    args_str = match.group(2) or ""
     args: dict = {}
 
     # Extraer argumentos clave-valor simples (ej: action='up', name='dolphin', query='...')
@@ -150,7 +150,8 @@ def parse_llm_tool_call(llm_output: str) -> tuple[str, dict] | None:
     for k, v in arg_matches:
         args[k] = v
 
-    if norm_name in ("volumecontrol", "setvolume"):
+    # 1. Volumen / Audio
+    if norm_name in ("volumecontrol", "setvolume", "audiocontrol", "soundcontrol"):
         action = args.get("action", "")
         direction = args.get("direction", "")
         if action == "mute":
@@ -161,20 +162,33 @@ def parse_llm_tool_call(llm_output: str) -> tuple[str, dict] | None:
             return "volume_control", {"direction": direction}
         return "volume_control", {"direction": "up"}
 
-    if norm_name in ("mediacontrol", "playbackcontrol"):
+    # 2. Control multimedia / Musica
+    if norm_name in ("mediacontrol", "playbackcontrol", "musiccontrol"):
         action = args.get("action", "play_pause")
         return "media_control", {"action": action}
 
+    # 3. Captura de pantalla
     if norm_name in ("screenshot", "takescreenshot"):
         return "screenshot", {}
 
-    if norm_name in ("openapp", "launchapp"):
+    # 4. Terminal directo
+    if norm_name in ("terminalcontrol", "terminal"):
+        return "open_app", {"name": "terminal"}
+
+    # 5. Apertura de aplicacion
+    if norm_name in ("openapp", "launchapp", "appcontrol"):
         name = args.get("name") or args.get("app_name") or args.get("target", "")
         return "open_app", {"name": name}
 
-    if norm_name in ("websearch", "searchweb"):
+    # 6. Busqueda web
+    if norm_name in ("websearch", "searchweb", "browsercontrol"):
         query = args.get("query", "")
         return "web_search", {"query": query}
+
+    # 7. Si el LLM emitio directamente TOOL: <nombre_app> (ej: TOOL: feishin o TOOL: dolphin)
+    from jota.config import APP_ALIASES, CUSTOM_APP_MAPPINGS
+    if norm_name in APP_ALIASES or norm_name in CUSTOM_APP_MAPPINGS:
+        return "open_app", {"name": raw_tool_name}
 
     return None
 

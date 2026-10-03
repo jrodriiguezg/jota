@@ -94,31 +94,25 @@ def _do_process() -> None:
             logger.info("Sin wake word detectado, ignorando.")
             return
 
-        logger.info("Comando/pregunta recibido: %r", clean)
+        logger.info("Enviando directamente al LLM: %r", clean)
 
-        # 4. Intentar resolver mediante el enrutador rapido de herramientas (<10ms)
-        tool_handled, tool_msg = tools.handle_intent(clean)
-        if tool_handled:
-            logger.info("Herramienta ejecutada directamente: %s", tool_msg)
-            if tool_msg:
-                tts.speak(tool_msg)
-            return
-
-        # 5. Si no es comando directo, consultar al LLM
+        # 4. Consultar directamente al LLM (Qwen deduce la intencion)
         response = llm.ask(clean)
         if not response:
             logger.warning("LLM devolvio respuesta vacia.")
             return
 
-        # 6. Comprobar si el LLM emitio una llamada a herramienta
+        # 5. Comprobar si el LLM emitio una llamada a herramienta
         tool_handled, tool_msg = tools.handle_llm_output(response)
         if tool_handled:
             logger.info("Herramienta ejecutada via LLM: %s", tool_msg)
-            if tool_msg:
-                tts.speak(tool_msg)
+            # Priorizar respuesta en lenguaje natural generada por el LLM si existe
+            spoken_text = llm.clean_text_for_tts(response) or tool_msg
+            if spoken_text:
+                tts.speak(spoken_text)
             return
 
-        # 7. Sintetizar y reproducir respuesta conversacional del LLM
+        # 6. Sintetizar y reproducir respuesta conversacional del LLM
         clean_response = llm.clean_text_for_tts(response)
         if clean_response:
             logger.info("Respondiendo: %r", clean_response)
