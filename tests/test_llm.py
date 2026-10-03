@@ -21,3 +21,22 @@ def test_clean_text_strips_think_blocks():
     assert "Thinking process" not in cleaned
     assert cleaned == "Hola, como estas?"
 
+
+def test_clean_text_strips_multiline_empty_think_blocks():
+    raw = "<think>\n\n</think>\n\nHola! Como te va?"
+    cleaned = clean_text_for_tts(raw)
+    assert cleaned == "Hola! Como te va?"
+
+
+def test_get_effective_system_prompt(monkeypatch):
+    import jota.llm as llm_module
+
+    monkeypatch.setattr(llm_module, "LLM_ENABLE_THINKING", False)
+    prompt_no_think = llm_module.get_effective_system_prompt()
+    assert prompt_no_think.endswith("/no_think")
+
+    monkeypatch.setattr(llm_module, "LLM_ENABLE_THINKING", True)
+    prompt_think = llm_module.get_effective_system_prompt()
+    assert prompt_think.endswith("/think")
+
+
