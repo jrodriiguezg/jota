@@ -114,6 +114,7 @@ class ClipboardPayload(BaseModel):
 class TextPromptPayload(BaseModel):
     prompt: str
     generate_audio: bool = False
+    play_on_pc: bool = False
 
 
 class RingPhonePayload(BaseModel):
@@ -213,13 +214,19 @@ def pc_download_file(path: str = Query(..., description="Ruta absoluta o relativ
 async def ask_voice(
     file: UploadFile = File(...),
     generate_audio: bool = Form(True),
+    play_on_pc: bool = Form(True),
 ):
     """
     Recibe un audio grabado desde el movil, ejecuta Whisper STT, consulta al LLM Qwen3,
     ejecuta herramientas del PC si aplica y sintetiza respuesta TTS en WAV.
+    Reproduce simultaneamente en el PC y devuelve el audio al movil.
     """
     audio_bytes = await file.read()
-    result = process_remote_voice(audio_bytes, generate_audio=generate_audio)
+    result = process_remote_voice(
+        audio_bytes,
+        generate_audio=generate_audio,
+        play_on_pc=play_on_pc,
+    )
     return result
 
 
@@ -228,7 +235,11 @@ def ask_text(payload: TextPromptPayload):
     """
     Consulta escrita directa a Jota desde el movil.
     """
-    result = process_remote_text(payload.prompt, generate_audio=payload.generate_audio)
+    result = process_remote_text(
+        payload.prompt,
+        generate_audio=payload.generate_audio,
+        play_on_pc=payload.play_on_pc,
+    )
     return result
 
 

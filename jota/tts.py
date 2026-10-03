@@ -3,6 +3,7 @@
 import logging
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 
 import sounddevice as sd
@@ -74,17 +75,28 @@ def speak(text: str) -> None:
     try:
         success = synthesize_to_file(text, tmp_path)
         if success:
-            _play_wav(tmp_path)
+            play_wav(tmp_path, block=True)
     finally:
         tmp_path.unlink(missing_ok=True)
 
 
-def _play_wav(path: Path) -> None:
+def play_wav(path: Path, block: bool = True) -> None:
     """Reproduce un archivo WAV por los altavoces del sistema."""
     try:
         data, samplerate = sf.read(str(path), dtype="float32")
         logger.debug("Reproduciendo respuesta (%.2fs)...", len(data) / samplerate)
         sd.play(data, samplerate)
-        sd.wait()
+        if block:
+            sd.wait()
     except Exception as e:
         logger.error("Error reproduciendo audio por altavoces: %s", e)
+
+
+def play_wav_async(path: Path) -> None:
+    """Reproduce un archivo WAV en segundo plano sin bloquear la respuesta de red."""
+    t = threading.Thread(target=play_wav, args=(path, True), daemon=True)
+    t.start()
+
+
+# Compatibilidad con imports previos
+_play_wav = play_wav
