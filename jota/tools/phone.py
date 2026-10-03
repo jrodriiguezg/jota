@@ -53,11 +53,28 @@ def _execute_in_process(action: str, value: str) -> str:
         return "Haciendo sonar tu telefono."
 
     if action in ("status", "estado", "bateria"):
+        devices = phone_manager.list_connected_devices()
+        if len(devices) > 1:
+            res = []
+            for d in devices:
+                did = d.get("device_id", "Dispositivo")
+                model = d.get("model", "")
+                name = f"{did} ({model})" if model else did
+                batt = d.get("battery")
+                if batt is not None:
+                    chg = "cargando" if d.get("is_charging") else "sin cargar"
+                    res.append(f"{name}: {batt}% ({chg})")
+                else:
+                    res.append(f"{name}: bateria no reportada")
+            return "Estado de tus dispositivos conectados: " + "; ".join(res) + "."
+
         info = phone_manager.get_device_status()
         batt = info.get("battery")
         if batt is not None:
             charging = "conectado al cargador" if info.get("is_charging") else "no esta cargando"
-            return f"Al telefono le queda un {batt}% de bateria y {charging}."
+            device_name = info.get("device_id")
+            prefix = f"A {device_name}" if device_name else "Al telefono"
+            return f"{prefix} le queda un {batt}% de bateria y {charging}."
         return "El telefono esta vinculado pero aun no ha reportado nivel de bateria."
 
     if action in ("clipboard", "portapapeles", "copiar"):
@@ -97,6 +114,23 @@ def _execute_via_http(action: str, value: str) -> str:
                 return "No hay ningun telefono conectado al bridge actualmente."
 
             if action in ("status", "estado", "bateria"):
+                dev_resp = client.get("/api/v1/phone/devices")
+                if dev_resp.status_code == 200:
+                    devices = dev_resp.json().get("devices", [])
+                    if len(devices) > 1:
+                        res = []
+                        for d in devices:
+                            did = d.get("device_id", "Dispositivo")
+                            model = d.get("model", "")
+                            name = f"{did} ({model})" if model else did
+                            batt = d.get("battery")
+                            if batt is not None:
+                                chg = "cargando" if d.get("is_charging") else "sin cargar"
+                                res.append(f"{name}: {batt}% ({chg})")
+                            else:
+                                res.append(f"{name}: sin datos de bateria")
+                        return "Estado de tus dispositivos: " + "; ".join(res) + "."
+
                 resp = client.get("/api/v1/phone/status")
                 if resp.status_code == 200:
                     data: dict[str, Any] = resp.json()
@@ -104,7 +138,9 @@ def _execute_via_http(action: str, value: str) -> str:
                     if batt is not None:
                         is_ch = data.get("is_charging")
                         charging = "conectado al cargador" if is_ch else "no esta cargando"
-                        return f"Al movil le queda un {batt}% de bateria y {charging}."
+                        did = data.get("device_id")
+                        prefix = f"A {did}" if did else "Al movil"
+                        return f"{prefix} le queda un {batt}% de bateria y {charging}."
                     return (
                         "El telefono esta conectado pero no ha reportado su porcentaje de bateria."
                     )
