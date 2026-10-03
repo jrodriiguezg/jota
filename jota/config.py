@@ -28,7 +28,17 @@ _found_ggufs = sorted(
 LLM_MODEL = _found_ggufs[0] if _found_ggufs else _default_qwen
 LLM_N_CTX = 2048          # contexto de tokens
 LLM_N_GPU_LAYERS = 0       # 0 = sólo CPU; -1 = todo en GPU si tienes CUDA/Vulkan
+
+# Parametros de muestreo recomendados oficialmente por Qwen3:
 LLM_TEMPERATURE = 0.7
+LLM_TOP_P = 0.8
+LLM_TOP_K = 20
+LLM_PRESENCE_PENALTY = 1.5
+
+# Modo de razonamiento (pensamiento):
+# False = /no_think por defecto (recomendado para asistente de voz, respuesta instantanea)
+# True  = /think (permite cadena de pensamiento interna <think>...</think>)
+LLM_ENABLE_THINKING = False
 
 # TTS: piper-tts
 PIPER_BIN = Path(shutil.which("piper") or (Path.home() / ".local" / "bin" / "piper"))

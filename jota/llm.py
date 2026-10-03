@@ -8,10 +8,14 @@ from collections.abc import Generator
 from llama_cpp import Llama
 
 from jota.config import (
+    LLM_ENABLE_THINKING,
     LLM_MODEL,
     LLM_N_CTX,
     LLM_N_GPU_LAYERS,
+    LLM_PRESENCE_PENALTY,
     LLM_TEMPERATURE,
+    LLM_TOP_K,
+    LLM_TOP_P,
     SYSTEM_PROMPT,
 )
 
@@ -45,6 +49,17 @@ def load_model() -> None:
     logger.info("Modelo cargado con %d hilos de CPU.", threads)
 
 
+def get_effective_system_prompt() -> str:
+    """
+    Devuelve el prompt del sistema configurado con la directiva de razonamiento
+    adecuada (/no_think o /think) segun LLM_ENABLE_THINKING.
+    """
+    directive = "/think" if LLM_ENABLE_THINKING else "/no_think"
+    if directive in SYSTEM_PROMPT:
+        return SYSTEM_PROMPT
+    return f"{SYSTEM_PROMPT}\n{directive}"
+
+
 def ask(prompt: str) -> str:
     """
     Envia un prompt al LLM y devuelve la respuesta limpia lista para TTS.
@@ -56,10 +71,13 @@ def ask(prompt: str) -> str:
 
     response = _llm.create_chat_completion(
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": get_effective_system_prompt()},
             {"role": "user", "content": prompt},
         ],
         temperature=LLM_TEMPERATURE,
+        top_p=LLM_TOP_P,
+        top_k=LLM_TOP_K,
+        presence_penalty=LLM_PRESENCE_PENALTY,
         max_tokens=256,  # respuestas cortas para TTS
         stream=False,
     )
@@ -101,10 +119,13 @@ def ask_stream(prompt: str) -> Generator[str, None, None]:
 
     for chunk in _llm.create_chat_completion(
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": get_effective_system_prompt()},
             {"role": "user", "content": prompt},
         ],
         temperature=LLM_TEMPERATURE,
+        top_p=LLM_TOP_P,
+        top_k=LLM_TOP_K,
+        presence_penalty=LLM_PRESENCE_PENALTY,
         max_tokens=256,
         stream=True,
     ):
