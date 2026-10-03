@@ -1,33 +1,82 @@
 #!/usr/bin/env python3
 """
-Herramienta de diagnóstico para encontrar el keycode de la tecla Copilot.
-Ejecuta: python tools/find_copilot_key.py
-Pulsa la tecla Copilot y mira el keycode que aparece.
+Herramienta de diagnostico para encontrar el keycode de la tecla Copilot.
+Escucha en TODOS los teclados y dispositivos de entrada conectados a la vez.
+
+Uso:
+    python tools/find_copilot_key.py
+
+Si no muestra dispositivos en tu terminal actual:
+    newgrp input
+    python tools/find_copilot_key.py
 """
 
+import os
+import selectors
+import sys
 import evdev
 from evdev import InputDevice, categorize, ecodes
 
 
 def main():
-    devices = [InputDevice(path) for path in evdev.list_devices()]
+    devices_paths = evdev.list_devices()
 
-    print("Dispositivos disponibles:")
-    for i, dev in enumerate(devices):
-        print(f"  [{i}] {dev.path} — {dev.name}")
+    if not devices_paths:
+        print("[!] No se encontraron dispositivos de entrada accesibles.")
+        print("    Tu usuario necesita permisos del grupo 'input'.")
+        print("\n    Solucion rapida para tu terminal actual:")
+        print("      newgrp input")
+        print("      python tools/find_copilot_key.py")
+        print("\n    O ejecutalo con sudo temporalmente:")
+        print("      sudo .venv/bin/python tools/find_copilot_key.py")
+        sys.exit(1)
 
-    choice = input("\nElige el número de tu teclado: ").strip()
-    dev = devices[int(choice)]
+    selector = selectors.DefaultSelector()
+    monitored = []
 
-    print(f"\nEscuchando eventos en: {dev.name}")
-    print("Pulsa la tecla Copilot (Ctrl+C para salir)...\n")
+    for path in devices_paths:
+        try:
+            dev = InputDevice(path)
+            caps = dev.capabilities()
+            if ecodes.EV_KEY in caps:
+                monitored.append(dev)
+                selector.register(dev, selectors.EVENT_READ)
+        except Exception:
+            continue
 
-    for event in dev.read_loop():
-        if event.type == ecodes.EV_KEY:
-            key = categorize(event)
-            if key.keystate in (key.key_down, key.key_up):
-                state = "PULSADA" if key.keystate == key.key_down else "SOLTADA"
-                print(f"  scancode: {key.scancode:#06x} ({key.scancode})  keycode: {key.keycode}  [{state}]")
+    if not monitored:
+        print("[!] No se encontraron dispositivos con eventos de teclas (EV_KEY).")
+        sys.exit(1)
+
+    print("====================================================")
+    print(f"  Monitorizando {len(monitored)} dispositivos con teclas:")
+    for d in monitored:
+        print(f"   * {d.name} ({d.path})")
+    print("====================================================")
+    print("\nPulsa la tecla Copilot (o cualquier tecla) para ver su codigo.")
+    print("Ctrl+C para salir.\n")
+
+    try:
+        while True:
+            for key, mask in selector.select():
+                device = key.fileobj
+                for event in device.read():
+                    if event.type == ecodes.EV_KEY:
+                        key_event = categorize(event)
+                        state = "PULSADA" if key_event.keystate == key_event.key_down else (
+                            "SOLTADA" if key_event.keystate == key_event.key_up else "REPETIDA"
+                        )
+                        scancode_hex = f"{key_event.scancode:#06x}"
+                        print(
+                            f"[{device.name}] "
+                            f"scancode: {scancode_hex} ({key_event.scancode}) | "
+                            f"keycode: {key_event.keycode} ({key_event.keystate}) | "
+                            f"estado: {state}"
+                        )
+                        if "COPILOT" in str(key_event.keycode) or "F23" in str(key_event.keycode):
+                            print(f"  --> Posible tecla Copilot detectada: {scancode_hex}")
+    except KeyboardInterrupt:
+        print("\nFinalizado.")
 
 
 if __name__ == "__main__":
