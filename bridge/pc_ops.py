@@ -9,6 +9,7 @@ import logging
 import os
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -126,10 +127,14 @@ def get_system_status() -> dict[str, Any]:
     }
 
 
-def capture_screen_bytes() -> bytes:
+SCREENSHOTS_DIR = Path.home() / ".local" / "share" / "jota" / "screenshots"
+
+
+def capture_screen_bytes(save_history: bool = True) -> bytes:
     """
     Captura la pantalla actual en Wayland usando grim y retorna los bytes PNG.
     Lanza RuntimeError si grim falla o no esta disponible.
+    Guarda una copia en SCREENSHOTS_DIR si save_history es True.
     """
     cmd = ["grim", "-"]
     try:
@@ -142,11 +147,117 @@ def capture_screen_bytes() -> bytes:
         if result.returncode != 0:
             err = result.stderr.decode("utf-8", errors="replace").strip()
             raise RuntimeError(f"grim fallo con codigo {result.returncode}: {err}")
-        return result.stdout
+
+        img_bytes = result.stdout
+        if save_history and img_bytes:
+            try:
+                SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                (SCREENSHOTS_DIR / f"screenshot_{ts}.png").write_bytes(img_bytes)
+            except Exception as e:
+                logger.warning("No se pudo guardar copia de captura en historial: %s", e)
+
+        return img_bytes
     except FileNotFoundError:
         raise RuntimeError("El binario 'grim' no se encuentra instalado en el sistema.")
     except subprocess.TimeoutExpired:
         raise RuntimeError("Tiempo de espera agotado al capturar la pantalla.")
+
+
+def get_pc_screenshots(limit: int = 50) -> list[dict[str, Any]]:
+    """
+    Retorna la lista de capturas de pantalla disponibles en el PC,
+    ordenadas cronologicamente desde la mas reciente.
+    """
+    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    scan_dirs = [
+        SCREENSHOTS_DIR,
+        Path.home() / "Imágenes" / "Capturas",
+        Path.home() / "Pictures" / "Screenshots",
+        Path.home() / "Imágenes",
+        Path.home() / "Pictures",
+    ]
+    seen_paths = set()
+    results: list[dict[str, Any]] = []
+
+    for s_dir in scan_dirs:
+        if not s_dir.exists():
+            continue
+        for ext in ("*.png", "*.jpg", "*.jpeg"):
+            for f in s_dir.glob(ext):
+                if not f.is_file() or f in seen_paths:
+                    continue
+                seen_paths.add(f)
+                name_lower = f.name.lower()
+                # En directorios genericos de Imagenes, filtrar solo aquellas que sean capturas
+                if s_dir in (Path.home() / "Imágenes", Path.home() / "Pictures"):
+                    if not any(
+                        k in name_lower for k in ("screenshot", "captura", "hyprshot", "grim")
+                    ):
+                        continue
+
+                try:
+                    stat = f.stat()
+                    dt = datetime.fromtimestamp(stat.st_mtime)
+                    try:
+                        rel = str(f.relative_to(Path.home()))
+                    except ValueError:
+                        rel = str(f)
+                    results.append(
+                        {
+                            "id": f.name,
+                            "filename": f.name,
+                            "relative_path": rel,
+                            "size_bytes": stat.st_size,
+                            "timestamp": int(stat.st_mtime),
+                            "date_str": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+                    )
+                except Exception as e:
+                    logger.debug("Error procesando imagen %s: %s", f, e)
+
+    results.sort(key=lambda x: x["timestamp"], reverse=True)
+    return results[:limit]
+
+
+def resolve_screenshot_file(query: str) -> Path | None:
+    """
+    Localiza y valida con seguridad una captura de pantalla especifica solicitada.
+    """
+    clean = query.strip()
+    if not clean:
+        return None
+
+    # 1. Si es ruta relativa dentro del HOME
+    direct = (Path.home() / clean).resolve()
+    if direct.is_file() and str(direct).startswith(str(Path.home())):
+        return direct
+
+    # 2. Buscar por nombre directo en directorios de capturas
+    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    candidates = [
+        SCREENSHOTS_DIR / clean,
+        Path.home() / "Imágenes" / "Capturas" / clean,
+        Path.home() / "Pictures" / "Screenshots" / clean,
+        Path.home() / "Imágenes" / clean,
+        Path.home() / "Pictures" / clean,
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c
+
+    # 3. Coincidencia parcial
+    for s_dir in [
+        SCREENSHOTS_DIR,
+        Path.home() / "Imágenes" / "Capturas",
+        Path.home() / "Imágenes",
+    ]:
+        if s_dir.exists():
+            for f in s_dir.glob("*.png"):
+                if clean in f.name:
+                    return f
+
+    return None
 
 
 def get_clipboard_text() -> str:

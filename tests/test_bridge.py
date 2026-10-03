@@ -206,3 +206,31 @@ class TestBridgeAPI:
             init_msg = ws.receive_json()
             assert init_msg["event"] == "connected"
             assert "pc_status" in init_msg
+
+    def test_pc_screenshots_list(self, client):
+        resp = client.get("/api/v1/pc/screenshots", headers={"X-Bridge-Key": BRIDGE_API_KEY})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "screenshots" in data
+        assert isinstance(data["screenshots"], list)
+
+    def test_pc_screenshots_file_not_found(self, client):
+        resp = client.get(
+            "/api/v1/pc/screenshots/file",
+            params={"name": "no_existe_captura_123.png"},
+            headers={"X-Bridge-Key": BRIDGE_API_KEY},
+        )
+        assert resp.status_code == 404
+
+    @patch("bridge.server.capture_screen_bytes")
+    def test_pc_capture_screenshot(self, mock_capture, client):
+        mock_capture.return_value = b"\x89PNG\r\n\x1a\nfake"
+        resp = client.post(
+            "/api/v1/pc/screenshots/capture",
+            headers={"X-Bridge-Key": BRIDGE_API_KEY},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "screenshots" in data
+

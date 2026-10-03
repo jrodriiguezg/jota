@@ -1,8 +1,8 @@
-"""Herramienta para captura de pantalla y copia directa al portapapeles (Wayland / Hyprland)."""
-
 import logging
 import shutil
 import subprocess
+from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,14 @@ def take_screenshot_to_clipboard() -> tuple[bool, str]:
         )
 
         if copy_proc.returncode == 0:
+            try:
+                save_dir = Path.home() / ".local" / "share" / "jota" / "screenshots"
+                save_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                (save_dir / f"screenshot_{ts}.png").write_bytes(grim_proc.stdout)
+            except Exception as e:
+                logger.debug("No se pudo guardar copia local de la captura: %s", e)
+
             msg = "Captura de pantalla copiada al portapapeles."
             logger.info(msg)
             return True, msg
