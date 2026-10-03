@@ -20,7 +20,7 @@ step() { echo -e "\n${BOLD}${BLUE}[$1]${NC} ${BOLD}$2${NC}"; }
 # ── Config ────────────────────────────────────────────────────────────────────
 MODELS_DIR="$HOME/.local/share/jota/models"
 WHISPER_BIN="/usr/local/bin/whisper-cli"
-PIPER_BIN="/usr/bin/piper"
+PIPER_BIN="$HOME/.local/bin/piper"
 WHISPER_BUILD_DIR="/tmp/jota-whisper-build"
 PIPER_VERSION="2023.11.14-2"
 
@@ -50,15 +50,20 @@ step "1/7" "Grupo 'input' (necesario para tecla Copilot sin sudo)"
 if groups | grep -q '\binput\b'; then
     already "Grupo input"
 else
-    info "Añadiendo $USER al grupo input..."
-    sudo usermod -aG input "$USER"
-    warn "Necesitarás re-loguearte para que el grupo surta efecto."
+    if sudo -n true 2>/dev/null; then
+        info "Añadiendo $USER al grupo input..."
+        sudo usermod -aG input "$USER"
+        warn "Necesitarás re-loguearte para que el grupo surta efecto."
+    else
+        warn "Tu usuario ($USER) aún no está en el grupo 'input'."
+        warn "Para activarlo, ejecuta en tu terminal: sudo usermod -aG input $USER"
+    fi
 fi
 
 # =============================================================================
 step "2/7" "Dependencias del sistema (Fedora)"
 # =============================================================================
-PKGS=(portaudio-devel libsndfile-devel cmake make gcc-c++ git curl)
+PKGS=(python3-devel portaudio-devel libsndfile-devel cmake make gcc-c++ git curl)
 MISSING=()
 for pkg in "${PKGS[@]}"; do
     if ! rpm -q "$pkg" &>/dev/null; then
@@ -70,8 +75,14 @@ if [[ ${#MISSING[@]} -eq 0 ]]; then
     already "Todos los paquetes del sistema"
 else
     info "Instalando: ${MISSING[*]}"
-    sudo dnf install -y "${MISSING[@]}"
-    ok "Paquetes instalados."
+    if sudo -n true 2>/dev/null || [ -t 0 ]; then
+        sudo dnf install -y "${MISSING[@]}"
+        ok "Paquetes instalados."
+    else
+        err "Se requiere contraseña de sudo para instalar: ${MISSING[*]}"
+        echo -e "    Ejecuta en tu terminal: ${BOLD}sudo dnf install -y ${MISSING[*]}${NC}"
+        exit 1
+    fi
 fi
 
 # =============================================================================
@@ -120,13 +131,13 @@ fi
 # =============================================================================
 step "5/7" "piper-tts"
 # =============================================================================
-if [[ -x "$PIPER_BIN" ]]; then
-    already "piper ($PIPER_BIN)"
+if command -v piper &>/dev/null || [[ -x "$PIPER_BIN" ]]; then
+    already "piper ($(command -v piper || echo "$PIPER_BIN"))"
 else
     ARCH="$(uname -m)"
     case "$ARCH" in
-        x86_64)  PIPER_ARCH="amd64" ;;
-        aarch64) PIPER_ARCH="arm64" ;;
+        x86_64)  PIPER_ARCH="x86_64" ;;
+        aarch64) PIPER_ARCH="aarch64" ;;
         *)
             err "Arquitectura $ARCH no soportada por los binarios de piper."
             err "Compílalo manualmente: https://github.com/rhasspy/piper"
@@ -134,18 +145,18 @@ else
             ;;
     esac
 
+    PIPER_INSTALL_DIR="$HOME/.local/share/jota/piper"
     PIPER_TAR="/tmp/piper_${PIPER_ARCH}.tar.gz"
     info "Descargando piper-tts (${PIPER_ARCH})..."
     curl -L "https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_${PIPER_ARCH}.tar.gz" \
          -o "$PIPER_TAR" --progress-bar
 
-    info "Extrayendo..."
-    tar -xzf "$PIPER_TAR" -C /tmp/
-    sudo install -m 755 /tmp/piper/piper "$PIPER_BIN"
-    # piper necesita libonnxruntime junto al binario
-    sudo cp /tmp/piper/libonnxruntime*.so* /usr/lib/ 2>/dev/null || true
-    sudo ldconfig
-    rm -rf /tmp/piper "$PIPER_TAR"
+    info "Extrayendo en $PIPER_INSTALL_DIR..."
+    mkdir -p "$HOME/.local/share/jota" "$HOME/.local/bin"
+    rm -rf "$PIPER_INSTALL_DIR"
+    tar -xzf "$PIPER_TAR" -C "$HOME/.local/share/jota/"
+    ln -sf "$PIPER_INSTALL_DIR/piper" "$PIPER_BIN"
+    rm -f "$PIPER_TAR"
     ok "piper instalado en $PIPER_BIN"
 fi
 
@@ -168,7 +179,8 @@ fi
 
 # Smoke test de piper
 info "Probando piper-tts..."
-if echo "Hola, soy Jota." | piper \
+PIPER_CMD="$(command -v piper || echo "$PIPER_BIN")"
+if echo "Hola, soy Jota." | "$PIPER_CMD" \
         --model "$PIPER_ONNX" \
         --output_file /tmp/jota-test.wav 2>/dev/null; then
     ok "piper funciona correctamente."

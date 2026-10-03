@@ -24,8 +24,10 @@ LLM_N_CTX = 2048          # contexto de tokens
 LLM_N_GPU_LAYERS = 0       # 0 = sólo CPU; -1 = todo en GPU si tienes CUDA/Vulkan
 LLM_TEMPERATURE = 0.7
 
+import shutil
+
 # TTS: piper-tts
-PIPER_BIN = Path("/usr/bin/piper")  # o donde esté instalado
+PIPER_BIN = Path(shutil.which("piper") or (Path.home() / ".local" / "bin" / "piper"))
 PIPER_MODEL = MODELS_DIR / "piper" / "es_ES-sharvard-medium.onnx"
 
 # ── Wake word ────────────────────────────────────────────────────────────────
