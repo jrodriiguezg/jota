@@ -17,7 +17,7 @@ import signal
 import sys
 import threading
 
-from jota import audio, hotkey, llm, stt, tts
+from jota import audio, hotkey, llm, stt, tools, tts
 
 logging.basicConfig(
     level=logging.INFO,
@@ -94,15 +94,31 @@ def _do_process() -> None:
             logger.info("Sin wake word detectado, ignorando.")
             return
 
-        logger.info("Pregunta para el LLM: %r", clean)
+        logger.info("Comando/pregunta recibido: %r", clean)
 
-        # 4. Consultar LLM
+        # 4. Intentar resolver mediante el enrutador rapido de herramientas (<10ms)
+        tool_handled, tool_msg = tools.handle_intent(clean)
+        if tool_handled:
+            logger.info("Herramienta ejecutada directamente: %s", tool_msg)
+            if tool_msg:
+                tts.speak(tool_msg)
+            return
+
+        # 5. Si no es comando directo, consultar al LLM
         response = llm.ask(clean)
         if not response:
             logger.warning("LLM devolvio respuesta vacia.")
             return
 
-        # 5. Sintetizar y reproducir
+        # 6. Comprobar si el LLM emitio una llamada a herramienta
+        tool_handled, tool_msg = tools.handle_llm_output(response)
+        if tool_handled:
+            logger.info("Herramienta ejecutada via LLM: %s", tool_msg)
+            if tool_msg:
+                tts.speak(tool_msg)
+            return
+
+        # 7. Sintetizar y reproducir respuesta conversacional del LLM
         logger.info("Respondiendo: %r", response)
         tts.speak(response)
 
@@ -115,7 +131,7 @@ def _do_process() -> None:
 
 def main() -> None:
     logger.info("=" * 50)
-    logger.info("  Jota -- Asistente de voz local  (Fase 1)")
+    logger.info("  Jota -- Asistente de voz local  (Fase 2)")
     logger.info("=" * 50)
 
     # Cargar modelo LLM (puede tardar unos segundos)

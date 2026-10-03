@@ -1,7 +1,7 @@
 [project]
 name = "jota"
-version = "0.1.0"
-description = "Asistente de voz local - Fase 1"
+version = "0.2.0"
+description = "Asistente de voz local - Fase 2 (Herramientas)"
 readme = "README.md"
 requires-python = ">=3.11"
 
