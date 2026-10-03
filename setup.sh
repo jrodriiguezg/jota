@@ -11,10 +11,10 @@ set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
-ok()   { echo -e "${GREEN}  ✓${NC} $*"; }
-info() { echo -e "${BLUE}  →${NC} $*"; }
-warn() { echo -e "${YELLOW}  ⚠${NC} $*"; }
-err()  { echo -e "${RED}  ✗${NC} $*" >&2; }
+ok()   { echo -e "${GREEN}  [OK]${NC} $*"; }
+info() { echo -e "${BLUE}  -->${NC} $*"; }
+warn() { echo -e "${YELLOW}  [!]${NC} $*"; }
+err()  { echo -e "${RED}  [X]${NC} $*" >&2; }
 step() { echo -e "\n${BOLD}${BLUE}[$1]${NC} ${BOLD}$2${NC}"; }
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -29,9 +29,9 @@ PIPER_MODEL_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es
 PIPER_MODEL_NAME="es_ES-sharvard-medium"
 
 # ── Banner ────────────────────────────────────────────────────────────────────
-echo -e "\n${BOLD}════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}  🎙️  Jota — Setup automático (Fase 1)${NC}"
-echo -e "${BOLD}════════════════════════════════════════════════════${NC}"
+echo -e "\n${BOLD}====================================================${NC}"
+echo -e "${BOLD}  Jota -- Setup automatico (Fase 1)${NC}"
+echo -e "${BOLD}====================================================${NC}"
 echo -e "  Modelos → ${MODELS_DIR}"
 echo ""
 
@@ -211,9 +211,9 @@ ok "Dependencias Python instaladas."
 # Modelo Qwen (no automatizable sin huggingface-cli o token)
 # =============================================================================
 echo ""
-echo -e "${BOLD}${YELLOW}════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}${YELLOW}  ⚠  Paso manual: modelo Qwen GGUF${NC}"
-echo -e "${BOLD}${YELLOW}════════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}${YELLOW}====================================================${NC}"
+echo -e "${BOLD}${YELLOW}  [!] Paso manual: modelo Qwen GGUF${NC}"
+echo -e "${BOLD}${YELLOW}====================================================${NC}"
 echo ""
 QWEN_DIR="$MODELS_DIR/qwen"
 mkdir -p "$QWEN_DIR"
@@ -224,7 +224,7 @@ else
     warn "No se encontró ningún modelo .gguf en $QWEN_DIR"
     echo ""
     echo "  Descárgalo de HuggingFace:"
-    echo "  → https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+    echo "  -> https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF"
     echo "  Archivo recomendado: qwen2.5-0.5b-instruct-q4_k_m.gguf"
     echo "  Guárdalo en: $QWEN_DIR/"
     echo ""
@@ -238,24 +238,24 @@ fi
 # Keycode de la tecla Copilot
 # =============================================================================
 echo ""
-echo -e "${BOLD}${YELLOW}════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}${YELLOW}  ⚠  Paso manual: keycode de la tecla Copilot${NC}"
-echo -e "${BOLD}${YELLOW}════════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}${YELLOW}====================================================${NC}"
+echo -e "${BOLD}${YELLOW}  [!] Paso manual: keycode de la tecla Copilot${NC}"
+echo -e "${BOLD}${YELLOW}====================================================${NC}"
 echo ""
 echo "  Ejecuta esto para encontrar el scancode de tu tecla:"
 echo "    source .venv/bin/activate"
 echo "    python tools/find_copilot_key.py"
 echo ""
 echo "  Luego edita jota/config.py:"
-echo "    COPILOT_KEY_CODE = 0x???  ← tu scancode"
+echo "    COPILOT_KEY_CODE = 0x???  # tu scancode"
 
 # =============================================================================
 # Resumen final
 # =============================================================================
 echo ""
-echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}${GREEN}  ✅  Setup completado${NC}"
-echo -e "${BOLD}${GREEN}════════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}${GREEN}====================================================${NC}"
+echo -e "${BOLD}${GREEN}  [OK] Setup completado${NC}"
+echo -e "${BOLD}${GREEN}====================================================${NC}"
 echo ""
 echo "  Cuando tengas el modelo Qwen y el keycode configurado:"
 echo ""
@@ -263,6 +263,6 @@ echo "    source .venv/bin/activate"
 echo "    jota"
 echo ""
 if ! groups | grep -q '\binput\b'; then
-    echo -e "  ${YELLOW}⚠  Recuerda re-loguearte para activar el grupo 'input'${NC}"
+    echo -e "  ${YELLOW}[!] Recuerda re-loguearte para activar el grupo 'input'${NC}"
     echo ""
 fi

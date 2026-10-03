@@ -1,4 +1,4 @@
-# 🎙️ Jota — Asistente de Voz Local
+# Jota — Asistente de Voz Local
 
 > Asistente de voz completamente **offline** para Fedora Linux / Hyprland.
 > Activación por tecla Copilot → hablas → Jota responde.
@@ -22,9 +22,9 @@
 
 | Fase | Estado | Descripción |
 |---|---|---|
-| **Fase 1** | ✅ En desarrollo | Oír y responder: Copilot → whisper → Qwen → piper |
-| Fase 2 | 🔲 Pendiente | Herramientas para el LLM (hora, clima, sistema…) |
-| Fase 3 | 🔲 Pendiente | Integración visual con Hyprland (overlay, notificaciones) |
+| **Fase 1** | En desarrollo | Oír y responder: Copilot → whisper → Qwen → piper |
+| Fase 2 | Pendiente | Herramientas para el LLM (hora, clima, sistema…) |
+| Fase 3 | Pendiente | Integración visual con Hyprland (overlay, notificaciones) |
 
 ---
 
@@ -258,7 +258,7 @@ pytest tests/ -v
 ```
 jota/
 ├── jota/
-│   ├── config.py      # ⚙️  Rutas de modelos y configuración
+│   ├── config.py      # Rutas de modelos y configuración
 │   ├── main.py        # Punto de entrada y orquestación
 │   ├── audio.py       # Grabación desde micrófono (sounddevice)
 │   ├── stt.py         # STT: whisper.cpp + limpieza de wake word
