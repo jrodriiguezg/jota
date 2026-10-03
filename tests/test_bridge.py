@@ -130,6 +130,12 @@ class TestPhoneTool:
         assert success is True
         assert len(msg) > 0
 
+    def test_phone_control_torch_and_silent(self):
+        msg_torch = phone_control("torch", "on")
+        assert isinstance(msg_torch, str)
+        msg_silent = phone_control("silent", "on")
+        assert isinstance(msg_silent, str)
+
 
 class TestBridgeAPI:
     """Verifica los endpoints REST y WebSocket de FastAPI con TestClient."""

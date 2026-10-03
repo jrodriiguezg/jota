@@ -267,3 +267,94 @@ class TestSystemTools:
         assert ok is True
         assert "CPU" in msg
 
+
+class TestExtendedTools:
+    """Verifica enrutamiento y ejecucion de herramientas extendidas."""
+
+    def test_parse_extended_tools(self):
+        assert parse_llm_tool_call("TOOL: switch_workspace(target=2)") == (
+            "switch_workspace",
+            {"target": 2},
+        )
+        assert parse_llm_tool_call("TOOL: move_to_workspace(target=3)") == (
+            "move_to_workspace",
+            {"target": 3},
+        )
+        assert parse_llm_tool_call("TOOL: get_weather(city='Madrid')") == (
+            "get_weather",
+            {"city": "Madrid"},
+        )
+        assert parse_llm_tool_call(
+            "TOOL: manage_notes(action='add', text='comprar pan')"
+        ) == ("manage_notes", {"action": "add", "text": "comprar pan"})
+        assert parse_llm_tool_call(
+            "TOOL: set_timer(seconds=60, label='la pizza')"
+        ) == ("set_timer", {"seconds": 60, "label": "la pizza"})
+
+    @patch("jota.tools.workspace.subprocess.run")
+    @patch("jota.tools.workspace.shutil.which")
+    def test_workspace_tools(self, mock_which, mock_run):
+        mock_which.return_value = "/usr/bin/hyprctl"
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_run.return_value = mock_res
+
+        ok, msg = execute_tool("switch_workspace", {"target": 2})
+        assert ok is True
+        assert "espacio de trabajo 2" in msg
+
+        ok, msg = execute_tool("move_to_workspace", {"target": 3})
+        assert ok is True
+        assert "espacio de trabajo 3" in msg
+
+    def test_notes_tools(self, tmp_path, monkeypatch):
+        test_file = tmp_path / "notes.md"
+        monkeypatch.setattr("jota.tools.notes.NOTES_FILE", test_file)
+
+        ok, msg = execute_tool("manage_notes", {"action": "add", "text": "comprar cafe"})
+        assert ok is True
+        assert "comprar cafe" in msg
+
+        ok, msg = execute_tool("manage_notes", {"action": "list"})
+        assert ok is True
+        assert "comprar cafe" in msg
+
+        ok, msg = execute_tool("manage_notes", {"action": "clear"})
+        assert ok is True
+        assert "borradas" in msg
+
+    @patch("jota.tools.timer.threading.Thread")
+    def test_timer_tool(self, mock_thread):
+        ok, msg = execute_tool("set_timer", {"seconds": 120, "label": "la sopa"})
+        assert ok is True
+        assert "2 minutos" in msg
+        mock_thread.return_value.start.assert_called_once()
+
+    @patch("jota.tools.weather.httpx.Client")
+    def test_weather_tool(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_resp_geo = MagicMock()
+        mock_resp_geo.status_code = 200
+        mock_resp_geo.json.return_value = {
+            "results": [
+                {"name": "Madrid", "latitude": 40.4, "longitude": -3.7, "country": "España"}
+            ]
+        }
+        mock_resp_weather = MagicMock()
+        mock_resp_weather.status_code = 200
+        mock_resp_weather.json.return_value = {
+            "current": {"temperature_2m": 22.5, "relative_humidity_2m": 45, "weather_code": 0}
+        }
+        mock_client.__enter__.return_value.get.side_effect = [
+            mock_resp_geo,
+            mock_resp_weather,
+        ]
+        mock_client_cls.return_value = mock_client
+
+        ok, msg = execute_tool("get_weather", {"city": "Madrid"})
+        assert ok is True
+        assert "Madrid" in msg
+        assert "22.5" in msg
+
+
+

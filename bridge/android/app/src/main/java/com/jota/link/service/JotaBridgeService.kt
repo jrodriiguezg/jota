@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.*
 import androidx.core.app.NotificationCompat
 import com.jota.link.network.BridgeClient
+import kotlinx.coroutines.*
 
 class JotaBridgeService : Service(), BridgeClient.BridgeListener {
     private var bridgeClient: BridgeClient? = null
@@ -111,6 +112,52 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         startActivity(intent)
+    }
+
+    override fun onTorch(enabled: Boolean) {
+        try {
+            val cm = getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
+            val cameraId = cm?.cameraIdList?.firstOrNull()
+            if (cm != null && cameraId != null) {
+                cm.setTorchMode(cameraId, enabled)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    override fun onSilent(silent: Boolean) {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (silent) {
+                am.ringerMode = AudioManager.RINGER_MODE_SILENT
+            } else {
+                am.ringerMode = AudioManager.RINGER_MODE_NORMAL
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    override fun onReceiveFile(filename: String, remotePath: String, sizeBytes: Long) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val destFile = java.io.File(downloadsDir, filename)
+                val ok = bridgeClient?.downloadPcFile(remotePath, destFile) ?: false
+                if (ok) {
+                    Handler(Looper.getMainLooper()).post {
+                        android.widget.Toast.makeText(
+                            applicationContext,
+                            "Archivo recibido: $filename en Descargas",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     private fun createNotificationChannel() {

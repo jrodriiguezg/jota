@@ -161,9 +161,18 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
     args: dict = {}
 
     # Extraer argumentos clave-valor simples (ej: action='up', name='dolphin', query='...')
-    arg_matches = re.findall(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*['\"](.*?)['\"]", args_str)
-    for k, v in arg_matches:
-        args[k] = v
+    arg_matches = re.findall(
+        r"([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(?:['\"](.*?)['\"]|([a-zA-Z0-9_.-]+))",
+        args_str,
+    )
+    for k, v_quoted, v_raw in arg_matches:
+        raw = v_quoted if v_quoted != "" else v_raw
+        if raw.isdigit():
+            args[k] = int(raw)
+        elif raw.lower() in ("true", "false"):
+            args[k] = raw.lower() == "true"
+        else:
+            args[k] = raw
 
     # 1. Volumen / Audio
     if norm_name in ("volumecontrol", "setvolume", "audiocontrol", "soundcontrol"):
@@ -244,6 +253,54 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
     if norm_name in ("pcsummary", "pcstatus", "estadopc", "systemsummary"):
         return "pc_summary", {}
 
+    # 13. Gestion de workspaces de Hyprland
+    if norm_name in (
+        "switchworkspace",
+        "changeworkspace",
+        "cambiarescritorio",
+        "iralescritorio",
+        "workspace",
+    ):
+        raw_target = args.get("target") or args.get("workspace_id") or args.get("id", 1)
+        try:
+            target = int(raw_target)
+        except (ValueError, TypeError):
+            target = 1
+        return "switch_workspace", {"target": target}
+
+    if norm_name in ("movetoworkspace", "moveraescritorio", "movewindowworkspace"):
+        raw_target = args.get("target") or args.get("workspace_id") or args.get("id", 1)
+        try:
+            target = int(raw_target)
+        except (ValueError, TypeError):
+            target = 1
+        return "move_to_workspace", {"target": target}
+
+    # 14. Clima y meteorologia
+    if norm_name in ("getweather", "weather", "clima", "tiempo", "consultartiempo"):
+        city = args.get("city") or args.get("location") or args.get("ciudad", "Madrid")
+        return "get_weather", {"city": city}
+
+    # 15. Notas y recordatorios
+    if norm_name in (
+        "managenotes",
+        "addnote",
+        "anotarnota",
+        "guardarnota",
+        "listnotes",
+        "leernotas",
+        "clearnotes",
+    ):
+        action = args.get("action", "add")
+        text = args.get("text") or args.get("content", "")
+        return "manage_notes", {"action": action, "text": text}
+
+    # 16. Temporizadores y alarmas
+    if norm_name in ("settimer", "timer", "temporizador", "alarma", "recordatorio"):
+        seconds = int(args.get("seconds") or (int(args.get("minutes", 0)) * 60) or 60)
+        label = args.get("label", "temporizador")
+        return "set_timer", {"seconds": seconds, "label": label}
+
     return None
 
 
@@ -305,5 +362,35 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
     if tool_name == "pc_summary":
         from jota.tools.system import get_pc_summary
         return get_pc_summary()
+
+    if tool_name == "switch_workspace":
+        from jota.tools.workspace import switch_workspace
+        target = args.get("target", 1)
+        return switch_workspace(target)
+
+    if tool_name == "move_to_workspace":
+        from jota.tools.workspace import move_to_workspace
+        target = args.get("target", 1)
+        return move_to_workspace(target)
+
+    if tool_name == "get_weather":
+        from jota.tools.weather import get_weather
+        city = args.get("city", "Madrid")
+        return get_weather(city)
+
+    if tool_name == "manage_notes":
+        from jota.tools.notes import add_note, clear_notes, list_notes
+        action = args.get("action", "add")
+        if action in ("list", "leer", "consultar"):
+            return list_notes(limit=int(args.get("limit", 5)))
+        if action in ("clear", "borrar"):
+            return clear_notes()
+        return add_note(args.get("text", ""))
+
+    if tool_name == "set_timer":
+        from jota.tools.timer import set_timer
+        seconds = int(args.get("seconds", 60))
+        label = args.get("label", "temporizador")
+        return set_timer(seconds, label)
 
     return False, f"Herramienta no implementada: {tool_name}"

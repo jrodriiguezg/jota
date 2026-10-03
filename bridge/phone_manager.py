@@ -134,6 +134,28 @@ class PhoneConnectionManager:
         """Abre una URL en el navegador del telefono."""
         return await self.send_event("open_url", {"url": url}, device_id=device_id)
 
+    async def set_torch(self, state: bool, device_id: str | None = None) -> bool:
+        """Enciende o apaga la linterna del telefono."""
+        return await self.send_event("torch", {"enabled": state}, device_id=device_id)
+
+    async def set_silent(self, silent: bool, device_id: str | None = None) -> bool:
+        """Activa o desactiva el modo silencio en el telefono."""
+        return await self.send_event("silent", {"silent": silent}, device_id=device_id)
+
+    async def push_file_to_phone(
+        self, filename: str, remote_path: str, size_bytes: int = 0, device_id: str | None = None
+    ) -> bool:
+        """Notifica al telefono para que descargue automaticamente un archivo del PC."""
+        return await self.send_event(
+            "receive_file",
+            {
+                "filename": filename,
+                "remote_path": remote_path,
+                "size_bytes": size_bytes,
+            },
+            device_id=device_id,
+        )
+
 
 # Instancia compartida global del gestor
 phone_manager = PhoneConnectionManager()

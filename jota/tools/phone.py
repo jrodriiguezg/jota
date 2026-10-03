@@ -6,11 +6,13 @@ hacerlo sonar, consultar su bateria y enviarle texto o enlaces.
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any
 
 import httpx
 
-from bridge.config import BRIDGE_API_KEY, BRIDGE_PORT
+from bridge.config import BRIDGE_API_KEY, BRIDGE_PORT, BRIDGE_TEMP_DIR
+from bridge.pc_ops import resolve_safe_file_path
 from bridge.phone_manager import phone_manager
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,62 @@ def phone_control(action: str, value: str = "") -> str:
     return _execute_via_http(clean_action, value)
 
 
+def _resolve_file_for_phone(query: str) -> Path | None:
+    """Localiza un archivo del PC solicitado para enviar al telefono."""
+    clean = query.strip()
+    if not clean:
+        return None
+
+    # Caso especial: capturas de pantalla
+    if any(k in clean.lower() for k in ("captura", "screenshot", "pantalla")):
+        candidates: list[Path] = []
+        for base in [
+            Path.home() / "Imágenes" / "Capturas",
+            Path.home() / "Pictures" / "Screenshots",
+            Path.home() / "Imágenes",
+            Path.home() / "Pictures",
+            BRIDGE_TEMP_DIR,
+        ]:
+            if base.exists():
+                candidates.extend(base.glob("*.png"))
+                candidates.extend(base.glob("*.jpg"))
+        if candidates:
+            candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            return candidates[0]
+
+        from jota.tools.screenshot import take_screenshot_to_clipboard
+        take_screenshot_to_clipboard()
+        for base in [Path.home() / "Imágenes", BRIDGE_TEMP_DIR]:
+            if base.exists():
+                candidates.extend(base.glob("*.png"))
+        if candidates:
+            candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            return candidates[0]
+
+    # Intentar resolver como ruta segura directa
+    try:
+        p = resolve_safe_file_path(clean)
+        if p.is_file():
+            return p
+    except Exception:
+        pass
+
+    # Buscar por coincidencia de nombre en Descargas o Documentos
+    for folder in [
+        Path.home() / "Descargas",
+        Path.home() / "Downloads",
+        Path.home() / "Documentos",
+        Path.home(),
+    ]:
+        if folder.exists():
+            matches = [m for m in folder.glob(f"*{clean}*") if m.is_file()]
+            if matches:
+                matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                return matches[0]
+
+    return None
+
+
 def _execute_in_process(action: str, value: str) -> str:
     """Ejecucion directa usando el PhoneConnectionManager en memoria."""
     loop = None
@@ -51,6 +109,47 @@ def _execute_in_process(action: str, value: str) -> str:
         else:
             asyncio.run(coro)
         return "Haciendo sonar tu telefono."
+
+    if action in ("torch", "linterna", "flash"):
+        state = value.lower().strip() not in ("off", "apagar", "false", "0", "desactivar")
+        coro = phone_manager.set_torch(state)
+        if loop and loop.is_running():
+            asyncio.create_task(coro)
+        else:
+            asyncio.run(coro)
+        return "Linterna del movil encendida." if state else "Linterna del movil apagada."
+
+    if action in ("silent", "silencio", "dnd", "nomolestar"):
+        silent_state = value.lower().strip() not in ("off", "desactivar", "false", "0", "sonar")
+        coro = phone_manager.set_silent(silent_state)
+        if loop and loop.is_running():
+            asyncio.create_task(coro)
+        else:
+            asyncio.run(coro)
+        return (
+            "Modo silencio activado en el telefono."
+            if silent_state
+            else "Modo silencio desactivado en el telefono."
+        )
+
+    if action in ("send_file", "sendfile", "enviar_archivo", "enviararchivo", "archivo"):
+        target_file = _resolve_file_for_phone(value)
+        if not target_file:
+            return f"No encontre el archivo '{value}' para enviar."
+        try:
+            rel_path = str(target_file.relative_to(Path.home()))
+        except ValueError:
+            rel_path = str(target_file)
+        coro = phone_manager.push_file_to_phone(
+            filename=target_file.name,
+            remote_path=rel_path,
+            size_bytes=target_file.stat().st_size,
+        )
+        if loop and loop.is_running():
+            asyncio.create_task(coro)
+        else:
+            asyncio.run(coro)
+        return f"Enviando '{target_file.name}' a tu telefono."
 
     if action in ("status", "estado", "bateria"):
         devices = phone_manager.list_connected_devices()

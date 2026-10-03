@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Base64
 import android.widget.Toast
@@ -13,6 +14,7 @@ import androidx.activity.compose.setContent
 import org.json.JSONObject
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -26,6 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -147,6 +151,28 @@ class MainActivity : ComponentActivity() {
         var inputUrl by remember { mutableStateOf(serverUrl) }
         var inputKey by remember { mutableStateOf(apiKey) }
         var inputId by remember { mutableStateOf(deviceId) }
+
+        var screenshotBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+        var showScreenshotDialog by remember { mutableStateOf(false) }
+
+        fun loadScreenshot() {
+            scope.launch {
+                try {
+                    val bytes = bridgeClient?.getPcScreenshot()
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (bmp != null) {
+                            screenshotBitmap = bmp.asImageBitmap()
+                            showScreenshotDialog = true
+                        }
+                    } else {
+                        Toast.makeText(this@MainActivity, "No se recibio imagen del PC", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Fallo al obtener captura: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
 
         fun refreshPcStatus() {
             scope.launch {
@@ -407,8 +433,19 @@ class MainActivity : ComponentActivity() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Estado del PC", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Button(onClick = { refreshPcStatus() }, shape = RoundedCornerShape(10.dp)) {
-                                Text("Actualizar")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { loadScreenshot() },
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Ver Pantalla")
+                                }
+                                Button(
+                                    onClick = { refreshPcStatus() },
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Actualizar")
+                                }
                             }
                         }
 
@@ -453,6 +490,30 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // ── Modal de Captura de Pantalla del PC ──
+            if (showScreenshotDialog && screenshotBitmap != null) {
+                AlertDialog(
+                    onDismissRequest = { showScreenshotDialog = false },
+                    title = { Text("Pantalla del PC", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Image(
+                                bitmap = screenshotBitmap!!,
+                                contentDescription = "Captura de pantalla",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = { showScreenshotDialog = false }) {
+                            Text("Cerrar")
+                        }
+                    }
+                )
+            }
+
             // ── Modal de Ayuda con Comandos Disponibles ──
             if (showHelpDialog) {
                 AlertDialog(
@@ -463,19 +524,19 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("Puedes decirlos por voz o escribirlos en el cuadro de peticion:", fontSize = 13.sp)
+                            Text("Todos ejecutables mediante la voz o texto:", fontSize = 13.sp)
 
                             Text("Multimedia y Audio", fontWeight = FontWeight.SemiBold, color = Color(0xFFCBA6F7))
-                            Text("- sube el volumen / baja el volumen\n- silencia el audio / quita silencio\n- pausa la musica / reproduce\n- siguiente cancion / cancion anterior", fontSize = 12.sp)
+                            Text("- sube / baja el volumen\n- silencia el audio / quita silencio\n- pausa la musica / reproduce\n- siguiente cancion / cancion anterior", fontSize = 12.sp)
 
-                            Text("Control del PC y Ventanas", fontWeight = FontWeight.SemiBold, color = Color(0xFF89B4FA))
-                            Text("- bloquea el PC / bloquea sesion\n- suspende el equipo / apaga el PC\n- cierra la ventana activa\n- haz una captura de pantalla\n- ¿como esta el PC?", fontSize = 12.sp)
-
-                            Text("Aplicaciones y Web", fontWeight = FontWeight.SemiBold, color = Color(0xFFA6E3A1))
-                            Text("- abre dolphin / explorador de archivos\n- abre feishin / reproductor de musica\n- abre terminal / kitty\n- buscame en la web que es una supernova", fontSize = 12.sp)
+                            Text("Control del PC y Escritorios", fontWeight = FontWeight.SemiBold, color = Color(0xFF89B4FA))
+                            Text("- bloquea el PC / suspende el equipo\n- cierra la ventana activa\n- pasa al escritorio [1-9]\n- mueve la ventana al escritorio [1-9]\n- haz una captura de pantalla\n- ¿como esta el PC?", fontSize = 12.sp)
 
                             Text("Telefono Vinculado", fontWeight = FontWeight.SemiBold, color = Color(0xFFF9E2AF))
-                            Text("- encuentra mi movil / haz sonar mi telefono\n- ¿cuanta bateria le queda al movil?\n- envia al movil este enlace https://...", fontSize = 12.sp)
+                            Text("- encuentra mi movil / haz sonar mi telefono\n- ¿cuanta bateria le queda al movil?\n- enciende / apaga la linterna del movil\n- pon el movil en silencio\n- manda al movil la ultima captura\n- manda al movil el archivo [nombre]\n- envia al movil este enlace https://...", fontSize = 12.sp)
+
+                            Text("Utilidades y Asistente", fontWeight = FontWeight.SemiBold, color = Color(0xFFA6E3A1))
+                            Text("- ¿que tiempo hace en [ciudad]? / ¿va a llover hoy?\n- anota [tarea o nota]\n- ¿que notas tengo pendientes?\n- avisame en [X] minutos para [motivo]\n- abre [aplicacion] / buscame en la web [consulta]", fontSize = 12.sp)
                         }
                     },
                     confirmButton = {

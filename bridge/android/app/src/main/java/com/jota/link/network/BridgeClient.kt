@@ -31,6 +31,9 @@ class BridgeClient(
         fun onRing(durationSeconds: Int)
         fun onClipboardReceived(text: String)
         fun onOpenUrl(url: String)
+        fun onTorch(enabled: Boolean)
+        fun onSilent(silent: Boolean)
+        fun onReceiveFile(filename: String, remotePath: String, sizeBytes: Long)
     }
 
     var listener: BridgeListener? = null
@@ -68,6 +71,20 @@ class BridgeClient(
                         "open_url" -> {
                             val targetUrl = payload.optString("url")
                             listener?.onOpenUrl(targetUrl)
+                        }
+                        "torch" -> {
+                            val enabled = payload.optBoolean("enabled", true)
+                            listener?.onTorch(enabled)
+                        }
+                        "silent" -> {
+                            val silent = payload.optBoolean("silent", true)
+                            listener?.onSilent(silent)
+                        }
+                        "receive_file" -> {
+                            val filename = payload.optString("filename", "archivo_jota")
+                            val remotePath = payload.optString("remote_path", filename)
+                            val sizeBytes = payload.optLong("size_bytes", 0L)
+                            listener?.onReceiveFile(filename, remotePath, sizeBytes)
                         }
                     }
                 } catch (e: Exception) {

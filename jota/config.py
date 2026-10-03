@@ -237,6 +237,50 @@ Usuario: manda una notificacion con el texto hola mundo
 TOOL: send_notification(title='Jota', message='hola mundo')
 Enviando notificacion al escritorio.
 
+Usuario: enciende la linterna del movil
+TOOL: phone_control(action='torch', value='on')
+Encendiendo linterna del movil.
+
+Usuario: apaga la linterna del movil
+TOOL: phone_control(action='torch', value='off')
+Apagando linterna del movil.
+
+Usuario: pon el movil en silencio
+TOOL: phone_control(action='silent', value='on')
+Poniendo el movil en silencio.
+
+Usuario: manda al movil la ultima captura
+TOOL: phone_control(action='send_file', value='captura')
+Enviando la ultima captura a tu telefono.
+
+Usuario: pasa al escritorio 2
+TOOL: switch_workspace(target=2)
+Cambiando al escritorio 2.
+
+Usuario: mueve la ventana al escritorio 3
+TOOL: move_to_workspace(target=3)
+Moviendo ventana al escritorio 3.
+
+Usuario: que tiempo hace en Madrid
+TOOL: get_weather(city='Madrid')
+Consultando el tiempo en Madrid.
+
+Usuario: va a llover hoy
+TOOL: get_weather(city='Madrid')
+Consultando si va a llover.
+
+Usuario: anota comprar cafe
+TOOL: manage_notes(action='add', text='comprar cafe')
+Guardando nota.
+
+Usuario: que notas tengo pendientes
+TOOL: manage_notes(action='list')
+Consultando tus notas.
+
+Usuario: avisame en 10 minutos para la pizza
+TOOL: set_timer(seconds=600, label='la pizza')
+Iniciando temporizador de 10 minutos para la pizza.
+
 Usuario: hola como estas
 Hola, estoy listo para ayudarte.
 
