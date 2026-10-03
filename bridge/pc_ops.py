@@ -232,3 +232,37 @@ def resolve_safe_file_path(requested_path: str) -> Path:
         raise ValueError(f"El archivo excede el limite maximo permitido de {max_mb} MB.")
 
     return resolved
+
+
+def execute_pc_action(action: str) -> tuple[bool, str]:
+    """
+    Ejecuta una accion rapida en el PC sin requerir transcripcion de voz.
+    Soporta: lock, mute, vol_up, vol_down, play_pause, next, previous.
+    """
+    from jota.tools.media import playback_control, set_volume, toggle_mute
+
+    clean_act = action.lower().strip()
+    if clean_act == "lock":
+        try:
+            subprocess.Popen(["hyprlock"])
+            return True, "Sesion bloqueada."
+        except FileNotFoundError:
+            subprocess.Popen(["loginctl", "lock-session"])
+            return True, "Sesion bloqueada."
+        except Exception as e:
+            return False, f"Error al bloquear sesion: {e}"
+
+    if clean_act == "mute":
+        return toggle_mute()
+    if clean_act in ("vol_up", "up", "volume_up"):
+        return set_volume("up")
+    if clean_act in ("vol_down", "down", "volume_down"):
+        return set_volume("down")
+    if clean_act in ("play_pause", "toggle_playback"):
+        return playback_control("play_pause")
+    if clean_act in ("next", "next_track"):
+        return playback_control("next")
+    if clean_act in ("previous", "prev", "prev_track"):
+        return playback_control("previous")
+
+    return False, f"Accion no reconocida: {action}"

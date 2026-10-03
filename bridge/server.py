@@ -35,6 +35,7 @@ from bridge.config import (
 )
 from bridge.pc_ops import (
     capture_screen_bytes,
+    execute_pc_action,
     get_clipboard_text,
     get_system_status,
     resolve_safe_file_path,
@@ -100,6 +101,10 @@ def verify_auth(
 
 
 # ── Modelos de Peticion ──────────────────────────────────────────────────────
+
+
+class PcActionPayload(BaseModel):
+    action: str
 
 
 class ClipboardPayload(BaseModel):
@@ -172,6 +177,15 @@ def pc_set_clipboard(payload: ClipboardPayload):
     if not ok:
         raise HTTPException(status_code=500, detail="Error al escribir en el portapapeles del PC.")
     return {"success": True}
+
+
+@app.post("/api/v1/pc/action", dependencies=[Depends(verify_auth)])
+def pc_action(payload: PcActionPayload):
+    """Ejecuta una accion rapida en el PC (lock, mute, play_pause, vol_up, etc.)."""
+    ok, message = execute_pc_action(payload.action)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {"success": True, "message": message}
 
 
 @app.get("/api/v1/pc/file", dependencies=[Depends(verify_auth)])

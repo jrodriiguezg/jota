@@ -139,6 +139,21 @@ class BridgeClient(
         JSONObject(bodyStr)
     }
 
+    suspend fun executePcAction(action: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val json = JSONObject().apply { put("action", action) }
+        val request = Request.Builder()
+            .url("$baseUrl/api/v1/pc/action")
+            .header("X-Bridge-Key", apiKey)
+            .post(json.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        val bodyStr = response.body?.string() ?: "{}"
+        val respJson = JSONObject(bodyStr)
+        val msg = respJson.optString("message", respJson.optString("detail", "Error"))
+        Pair(response.isSuccessful, msg)
+    }
+
     suspend fun getPcStatus(): JSONObject = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("$baseUrl/api/v1/pc/status")
