@@ -2,7 +2,17 @@
 
 import logging
 
-from jota.tools.router import execute_tool, match_fast_intent, parse_llm_tool_call
+from jota.tools.router import (
+    ToolCall as ToolCall,
+)
+from jota.tools.router import (
+    execute_tool,
+    match_fast_intent,
+    parse_llm_tool_call,
+)
+
+# Alias conveniente para llamadas al parser
+parse_llm_tool = parse_llm_tool_call
 
 logger = logging.getLogger(__name__)
 

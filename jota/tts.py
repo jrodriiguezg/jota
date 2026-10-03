@@ -13,35 +13,27 @@ from jota.config import PIPER_BIN, PIPER_MODEL
 logger = logging.getLogger(__name__)
 
 
-def speak(text: str) -> None:
+def synthesize_to_file(text: str, output_path: Path) -> bool:
     """
-    Sintetiza el texto con piper-tts y lo reproduce por los altavoces.
-    Bloquea hasta que el audio termine de reproducirse.
+    Sintetiza texto a un archivo WAV usando piper-tts.
+    Devuelve True si el archivo se genero exitosamente.
     """
     if not text or not text.strip():
-        return
+        return False
 
     if not PIPER_BIN.exists():
-        raise FileNotFoundError(
-            f"Binario de piper no encontrado en {PIPER_BIN}.\n"
-            "Ejecuta bash setup.sh para instalarlo en tu entorno."
-        )
+        logger.error("Binario de piper no encontrado en %s", PIPER_BIN)
+        return False
     if not PIPER_MODEL.exists():
-        raise FileNotFoundError(
-            f"Modelo de voz piper no encontrado en {PIPER_MODEL}.\n"
-            "Ejecuta bash setup.sh para descargarlo."
-        )
+        logger.error("Modelo de voz piper no encontrado en %s", PIPER_MODEL)
+        return False
 
-    logger.debug("TTS: %r", text)
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-
+    logger.debug("TTS sintesis a archivo %s: %r", output_path, text)
     try:
         cmd = [
             str(PIPER_BIN),
             "--model", str(PIPER_MODEL),
-            "--output_file", str(tmp_path),
+            "--output_file", str(output_path),
         ]
         result = subprocess.run(
             cmd,
@@ -50,20 +42,39 @@ def speak(text: str) -> None:
             text=True,
             timeout=30,
         )
-
         if result.returncode != 0:
             logger.error("piper-tts fallo: %s", result.stderr)
-            return
+            return False
 
-        if tmp_path.exists() and tmp_path.stat().st_size > 44:  # 44 bytes es solo la cabecera WAV
-            _play_wav(tmp_path)
-        else:
-            logger.warning("piper-tts genero un archivo de audio vacio.")
+        if output_path.exists() and output_path.stat().st_size > 44:
+            return True
+
+        logger.warning("piper-tts genero un archivo vacio.")
+        return False
 
     except subprocess.TimeoutExpired:
         logger.error("piper-tts tardo demasiado (timeout).")
+        return False
     except Exception as e:
         logger.error("Error durante la sintesis TTS: %s", e)
+        return False
+
+
+def speak(text: str) -> None:
+    """
+    Sintetiza el texto con piper-tts y lo reproduce por los altavoces.
+    Bloquea hasta que el audio termine de reproducirse.
+    """
+    if not text or not text.strip():
+        return
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        success = synthesize_to_file(text, tmp_path)
+        if success:
+            _play_wav(tmp_path)
     finally:
         tmp_path.unlink(missing_ok=True)
 

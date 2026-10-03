@@ -195,6 +195,22 @@ Usuario: buscame en la web que es una vaca
 TOOL: web_search(query='que es una vaca')
 Buscando en la web que es una vaca.
 
+Usuario: encuentra mi movil
+TOOL: phone_control(action='ring')
+Haciendo sonar tu telefono.
+
+Usuario: haz sonar mi telefono
+TOOL: phone_control(action='ring')
+Haciendo sonar tu telefono.
+
+Usuario: cuanta bateria le queda al movil
+TOOL: phone_control(action='status')
+Consultando el estado de tu telefono.
+
+Usuario: envia al movil este enlace https://google.com
+TOOL: phone_control(action='open_url', value='https://google.com')
+Enviando el enlace a tu telefono.
+
 Usuario: hola como estas
 Hola, estoy listo para ayudarte.
 

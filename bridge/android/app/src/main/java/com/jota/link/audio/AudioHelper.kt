@@ -1,0 +1,133 @@
+package com.jota.link.audio
+
+import android.annotation.SuppressLint
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaPlayer
+import android.media.MediaRecorder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+
+class AudioHelper {
+    private val sampleRate = 16000
+    private val channelConfig = AudioFormat.CHANNEL_IN_MONO
+    private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+    private var audioRecord: AudioRecord? = null
+    private var isRecording = false
+    private val pcmOutputStream = ByteArrayOutputStream()
+
+    @SuppressLint("MissingPermission")
+    fun startRecording() {
+        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+        audioRecord = AudioRecord(
+            MediaRecorder.AudioSource.MIC,
+            sampleRate,
+            channelConfig,
+            audioFormat,
+            minBufferSize * 2
+        )
+
+        pcmOutputStream.reset()
+        isRecording = true
+        audioRecord?.startRecording()
+
+        Thread {
+            val buffer = ByteArray(minBufferSize)
+            while (isRecording && audioRecord != null) {
+                val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                if (read > 0) {
+                    pcmOutputStream.write(buffer, 0, read)
+                }
+            }
+        }.start()
+    }
+
+    fun stopRecording(): ByteArray {
+        isRecording = false
+        try {
+            audioRecord?.stop()
+            audioRecord?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        audioRecord = null
+
+        val pcmData = pcmOutputStream.toByteArray()
+        return createWavBytes(pcmData, sampleRate, 1, 16)
+    }
+
+    suspend fun playAudio(wavBytes: ByteArray) = withContext(Dispatchers.IO) {
+        val tempFile = File.createTempFile("jota_reply_", ".wav")
+        try {
+            FileOutputStream(tempFile).use { it.write(wavBytes) }
+            val mediaPlayer = MediaPlayer()
+            mediaPlayer.setDataSource(tempFile.absolutePath)
+            mediaPlayer.prepare()
+            mediaPlayer.start()
+            mediaPlayer.setOnCompletionListener {
+                mediaPlayer.release()
+                tempFile.delete()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            tempFile.delete()
+        }
+    }
+
+    private fun createWavBytes(pcmData: ByteArray, sampleRate: Int, channels: Int, bitsPerSample: Int): ByteArray {
+        val totalAudioLen = pcmData.size
+        val totalDataLen = totalAudioLen + 36
+        val byteRate = sampleRate * channels * bitsPerSample / 8
+
+        val header = ByteArray(44)
+        header[0] = 'R'.code.toByte()
+        header[1] = 'I'.code.toByte()
+        header[2] = 'F'.code.toByte()
+        header[3] = 'F'.code.toByte()
+        header[4] = (totalDataLen and 0xff).toByte()
+        header[5] = ((totalDataLen shr 8) and 0xff).toByte()
+        header[6] = ((totalDataLen shr 16) and 0xff).toByte()
+        header[7] = ((totalDataLen shr 24) and 0xff).toByte()
+        header[8] = 'W'.code.toByte()
+        header[9] = 'A'.code.toByte()
+        header[10] = 'V'.code.toByte()
+        header[11] = 'E'.code.toByte()
+        header[12] = 'f'.code.toByte()
+        header[13] = 'm'.code.toByte()
+        header[14] = 't'.code.toByte()
+        header[15] = ' '.code.toByte()
+        header[16] = 16
+        header[17] = 0
+        header[18] = 0
+        header[19] = 0
+        header[20] = 1 // PCM
+        header[21] = 0
+        header[22] = channels.toByte()
+        header[23] = 0
+        header[24] = (sampleRate and 0xff).toByte()
+        header[25] = ((sampleRate shr 8) and 0xff).toByte()
+        header[26] = ((sampleRate shr 16) and 0xff).toByte()
+        header[27] = ((sampleRate shr 24) and 0xff).toByte()
+        header[28] = (byteRate and 0xff).toByte()
+        header[29] = ((byteRate shr 8) and 0xff).toByte()
+        header[30] = ((byteRate shr 16) and 0xff).toByte()
+        header[31] = ((byteRate shr 24) and 0xff).toByte()
+        header[32] = (channels * bitsPerSample / 8).toByte()
+        header[33] = 0
+        header[34] = bitsPerSample.toByte()
+        header[35] = 0
+        header[36] = 'd'.code.toByte()
+        header[37] = 'a'.code.toByte()
+        header[38] = 't'.code.toByte()
+        header[39] = 'a'.code.toByte()
+        header[40] = (totalAudioLen and 0xff).toByte()
+        header[41] = ((totalAudioLen shr 8) and 0xff).toByte()
+        header[42] = ((totalAudioLen shr 16) and 0xff).toByte()
+        header[43] = ((totalAudioLen shr 24) and 0xff).toByte()
+
+        return header + pcmData
+    }
+}
