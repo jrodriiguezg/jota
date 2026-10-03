@@ -28,6 +28,8 @@ _llm: Llama | None = None
 def load_model() -> None:
     """Carga el modelo GGUF en memoria. Llamar al arrancar."""
     global _llm
+    if _llm is not None:
+        return
 
     if not LLM_MODEL.exists():
         raise FileNotFoundError(

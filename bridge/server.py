@@ -55,6 +55,11 @@ async def lifespan(app: FastAPI):
     logger.info("  Jota Bridge activo en http://%s:%s", BRIDGE_HOST, BRIDGE_PORT)
     logger.info("  Canal de vinculacion Android listo en /ws/phone")
     logger.info("==================================================")
+    try:
+        from jota.llm import load_model
+        load_model()
+    except Exception as e:
+        logger.warning("No se pudo pre-cargar el modelo LLM en el Bridge: %s", e)
     yield
     logger.info("Deteniendo Jota Bridge...")
 
