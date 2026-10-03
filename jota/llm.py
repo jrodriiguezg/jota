@@ -140,3 +140,7 @@ def ask_stream(prompt: str) -> Generator[str, None, None]:
         delta = chunk["choices"][0]["delta"]
         if "content" in delta:
             yield delta["content"]
+
+
+# Alias conveniente
+ask_llm = ask

@@ -2,6 +2,7 @@
 
 import logging
 import re
+from typing import NamedTuple
 
 from jota.tools.apps import launch_application
 from jota.tools.media import playback_control, set_volume, toggle_mute
@@ -131,11 +132,25 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     return None
 
 
-def parse_llm_tool_call(llm_output: str) -> tuple[str, dict] | None:
+class ToolCall(NamedTuple):
+    name: str
+    args: dict
+
+
+def parse_llm_tool_call(llm_output: str) -> ToolCall | None:
     """
     Analiza la respuesta del LLM buscando directivas TOOL: nombre(argumentos) o TOOL: nombre.
     Tolera nombres de herramientas con y sin guion bajo, nombres directos de aplicacion, etc.
+    Retorna un ToolCall (NamedTuple) compatible con desempaquetado de tupla y atributos
+    .name, .args.
     """
+    raw = _parse_llm_tool_call_raw(llm_output)
+    if raw is None:
+        return None
+    return ToolCall(raw[0], raw[1])
+
+
+def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
     match = re.search(r"TOOL:\s*([a-zA-Z0-9_]+)(?:\((.*?)\))?", llm_output)
     if not match:
         return None
@@ -190,6 +205,12 @@ def parse_llm_tool_call(llm_output: str) -> tuple[str, dict] | None:
     if norm_name in APP_ALIASES or norm_name in CUSTOM_APP_MAPPINGS:
         return "open_app", {"name": raw_tool_name}
 
+    # 8. Control del telefono Android
+    if norm_name in ("phonecontrol", "mobilecontrol", "phonetool", "celular", "phone"):
+        action = args.get("action", "ring")
+        value = args.get("value") or args.get("text") or args.get("url", "")
+        return "phone_control", {"action": action, "value": value}
+
     return None
 
 
@@ -220,5 +241,12 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
     if tool_name == "web_search":
         query = args.get("query", "")
         return open_web_search(query)
+
+    if tool_name == "phone_control":
+        from jota.tools.phone import phone_control
+        action = args.get("action", "ring")
+        value = args.get("value", "")
+        msg = phone_control(action, value)
+        return True, msg
 
     return False, f"Herramienta no implementada: {tool_name}"
