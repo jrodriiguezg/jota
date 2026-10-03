@@ -31,9 +31,10 @@
 
 ## Herramientas del Sistema (Fase 2)
 
-Jota implementa una arquitectura en dos niveles para una ejecucion ultra-rapida:
-1. **Nivel 1 — Enrutador Rapido de Intenciones (<10 ms):** Reconoce patrones y comandos comunes al instante sin esperar la inferencia del LLM.
-2. **Nivel 2 — LLM Tool Calling:** Si la peticion es formulada de forma compleja o conversacional, el LLM emite directivas `TOOL: nombre(argumentos)` que son parseadas y ejecutadas.
+Jota procesa las peticiones de voz directamente a traves del modelo LLM (Qwen3-0.6B):
+1. **Razonamiento directo con LLM:** Toda transcripcion de voz se evalua directamente con Qwen3, permitiendo al modelo deducir la intencion real incluso con inconsistencias foneticas de Whisper.
+2. **LLM Tool Calling:** El modelo emite directivas en formato `TOOL: nombre(argumentos)` acompanadas de una confirmacion breve. El asistente ejecuta la herramienta del sistema en segundo plano y el sintetizador Piper reproduce unicamente la respuesta hablada.
+3. **Push-to-Talk sin Wake Word obligatorio:** Al presionar la tecla Copilot, no se exige decir "Jota" (`REQUIRE_WAKE_WORD = False`). Se pueden dar comandos directos ("sube el volumen", "abre terminal"). Si se pronuncia la palabra clave por costumbre, se elimina limpiamente. El modo estricto con wake word obligatorio queda reservado para activacion manos libres.
 
 ### 1. Control Multimedia y Volumen
 - **Volumen:** "sube el volumen", "baja el volumen", "aumenta el sonido", "menos volumen".

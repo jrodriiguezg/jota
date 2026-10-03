@@ -6,7 +6,13 @@ import re
 import subprocess
 from pathlib import Path
 
-from jota.config import WAKE_WORDS, WHISPER_BIN, WHISPER_LANG, WHISPER_MODEL
+from jota.config import (
+    REQUIRE_WAKE_WORD,
+    WAKE_WORDS,
+    WHISPER_BIN,
+    WHISPER_LANG,
+    WHISPER_MODEL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,20 +91,20 @@ def transcribe(audio_path: Path) -> str | None:
         txt_file.unlink(missing_ok=True)
 
 
-def strip_wake_word(text: str) -> str | None:
+def strip_wake_word(text: str, require_wake_word: bool = REQUIRE_WAKE_WORD) -> str | None:
     """
-    Elimina el wake word del inicio de la frase.
-    Ejemplos:
-        "Jota, ¿como estas?"   -> "como estas?"
-        "J, ¿como estas?"      -> "como estas?"
-        "¡Jota! que hora es"   -> "que hora es"
-        "Hota que hora es"     -> "que hora es"
-        "Como estas"           -> None  (sin wake word detectado)
+    Elimina el wake word del inicio de la frase si esta presente.
+    Si require_wake_word es False (modo push-to-talk por defecto):
+        - Si tiene wake word, lo retira y devuelve el resto.
+        - Si no tiene wake word, devuelve la frase limpia de signos iniciales.
+    Si require_wake_word es True (modo manos libres):
+        - Devuelve None si no se detecto ningun wake word.
+    """
+    cleaned_start = re.sub(r"^[\s¡¿\"']+", "", text).strip()
+    if not cleaned_start:
+        return None
 
-    Devuelve el texto limpio o None si no se detecto ningun wake word.
-    """
-    cleaned_start = re.sub(r"^[\s¡¿\"']+", "", text)
-    normalized = cleaned_start.strip().lower()
+    normalized = cleaned_start.lower()
 
     # Ordenar por longitud descendente para que 'jota' tenga prioridad sobre 'j'
     sorted_words = sorted(WAKE_WORDS, key=len, reverse=True)
@@ -115,5 +121,11 @@ def strip_wake_word(text: str) -> str | None:
             logger.debug("Wake word '%s' detectado. Frase limpia: %r", word, cleaned)
             return cleaned if cleaned else None
 
-    logger.debug("No se detecto wake word en: %r", text)
-    return None
+    # Si no se encontro wake word
+    if require_wake_word:
+        logger.debug("No se detecto wake word requerido en: %r", text)
+        return None
+
+    # En modo push-to-talk (sin wake word obligatorio), se procesa la frase directa
+    logger.debug("Procesando directamente en modo push-to-talk: %r", cleaned_start)
+    return cleaned_start
