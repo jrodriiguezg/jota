@@ -12,7 +12,7 @@ from typing import Callable
 import evdev
 from evdev import InputDevice, categorize, ecodes
 
-from jota.config import COPILOT_KEY_CODE
+from jota.config import COPILOT_KEY_CODE, COPILOT_KEY_CODES
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,14 @@ class CopilotHotkey:
                             continue
 
                         key_event = categorize(event)
-                        if key_event.scancode != COPILOT_KEY_CODE:
+                        is_copilot = (
+                            key_event.scancode == COPILOT_KEY_CODE
+                            or key_event.scancode in COPILOT_KEY_CODES
+                            or key_event.keycode == "KEY_F23"
+                            or key_event.keycode == "KEY_COPILOT"
+                            or (isinstance(key_event.keycode, list) and any(k in ["KEY_F23", "KEY_COPILOT"] for k in key_event.keycode))
+                        )
+                        if not is_copilot:
                             continue
 
                         if key_event.keystate == key_event.key_down:

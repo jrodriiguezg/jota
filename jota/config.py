@@ -51,12 +51,10 @@ AUDIO_TMP_FILE = Path("/tmp/jota_input.wav")
 
 # ── Hotkey ───────────────────────────────────────────────────────────────────
 
-# Código de la tecla Copilot en evdev.
-# Puedes encontrarlo con: python -m evdev.evtest
-# o ejecutando: sudo evtest
-# La tecla Copilot suele ser KEY_LEFTMETA+KEY_C o tiene su propio keycode.
-# Valor por defecto: 0x1d8 = 472 (Copilot key en algunos teclados)
-COPILOT_KEY_CODE = 0x1D8  # KEY_COPILOT en kernels recientes
+# Codigo de la tecla Copilot detectado en tu hardware:
+# Al pulsar la tecla Copilot, el teclado emite KEY_F23 (scancode 0x00c1 = 193)
+COPILOT_KEY_CODE = 0x00C1
+COPILOT_KEY_CODES = {0x00C1, 0x1D8, 193, 472}
 
 # ── Sistema prompt del LLM ───────────────────────────────────────────────────
 
