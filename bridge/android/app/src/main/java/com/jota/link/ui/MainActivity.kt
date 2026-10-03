@@ -1,7 +1,9 @@
 package com.jota.link.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Bundle
@@ -31,9 +33,10 @@ import java.io.File
 
 class MainActivity : ComponentActivity() {
     private val audioHelper = AudioHelper()
-    private lateinit var bridgeClient: BridgeClient
+    private var bridgeClient: BridgeClient? = null
+    private lateinit var prefs: SharedPreferences
 
-    private var serverUrl by mutableStateOf("http://100.64.0.1:8765")
+    private var serverUrl by mutableStateOf("http://100.81.222.82:8765")
     private var apiKey by mutableStateOf("jota-secret-tailscale-key")
     private var deviceId by mutableStateOf("android_user")
 
@@ -47,6 +50,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        prefs = getSharedPreferences("jota_link_prefs", Context.MODE_PRIVATE)
+
+        // Cargar configuracion guardada o usar valores por defecto
+        serverUrl = prefs.getString("server_url", "http://100.81.222.82:8765") ?: "http://100.81.222.82:8765"
+        apiKey = prefs.getString("api_key", "jota-secret-tailscale-key") ?: "jota-secret-tailscale-key"
+        deviceId = prefs.getString("device_id", "android_user") ?: "android_user"
+
         bridgeClient = BridgeClient(this, serverUrl, apiKey, deviceId)
 
         checkPermissions()
@@ -87,6 +97,24 @@ class MainActivity : ComponentActivity() {
         startForegroundService(intent)
     }
 
+    private fun updateConnectionConfig(newUrl: String, newKey: String, newId: String) {
+        serverUrl = newUrl.trim()
+        apiKey = newKey.trim()
+        deviceId = newId.trim()
+
+        prefs.edit().apply {
+            putString("server_url", serverUrl)
+            putString("api_key", apiKey)
+            putString("device_id", deviceId)
+            apply()
+        }
+
+        bridgeClient?.disconnect()
+        bridgeClient = BridgeClient(this, serverUrl, apiKey, deviceId)
+        startBridgeService()
+        Toast.makeText(this, "Configuracion guardada. Reconectando...", Toast.LENGTH_SHORT).show()
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun JotaLinkScreen() {
@@ -95,12 +123,25 @@ class MainActivity : ComponentActivity() {
         var isRecording by remember { mutableStateOf(false) }
         var replyText by remember { mutableStateOf("") }
         var screenshotBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-        var filePathInput by remember { mutableStateOf("/home/user/documento.txt") }
+        var filePathInput by remember { mutableStateOf("/home/jrodriiguezg/README.md") }
         var clipboardInput by remember { mutableStateOf("") }
+
+        // Estados para la tarjeta de configuracion
+        var showSettings by remember { mutableStateOf(false) }
+        var inputUrl by remember { mutableStateOf(serverUrl) }
+        var inputKey by remember { mutableStateOf(apiKey) }
+        var inputId by remember { mutableStateOf(deviceId) }
 
         Scaffold(
             topBar = {
-                TopAppBar(title = { Text("JotaLink — Control PC") })
+                TopAppBar(
+                    title = { Text("JotaLink") },
+                    actions = {
+                        TextButton(onClick = { showSettings = !showSettings }) {
+                            Text(if (showSettings) "Ocultar Ajustes" else "Ajustes")
+                        }
+                    }
+                )
             }
         ) { padding ->
             Column(
@@ -112,6 +153,48 @@ class MainActivity : ComponentActivity() {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // 0. Tarjeta de Configuracion de Conexion
+                if (showSettings) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("Configuracion Tailscale", style = MaterialTheme.typography.titleMedium)
+                            OutlinedTextField(
+                                value = inputUrl,
+                                onValueChange = { inputUrl = it },
+                                label = { Text("Server URL") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = inputKey,
+                                onValueChange = { inputKey = it },
+                                label = { Text("API Key") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = inputId,
+                                onValueChange = { inputId = it },
+                                label = { Text("Device ID") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Button(
+                                onClick = {
+                                    updateConnectionConfig(inputUrl, inputKey, inputId)
+                                    showSettings = false
+                                },
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text("Guardar y Conectar")
+                            }
+                        }
+                    }
+                }
+
                 // 1. Tarjeta Push-to-Talk
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -129,7 +212,7 @@ class MainActivity : ComponentActivity() {
                         Button(
                             onClick = {},
                             modifier = Modifier
-                                .size(90.dp)
+                                .size(100.dp)
                                 .pointerInput(Unit) {
                                     detectTapGestures(
                                         onPress = {
@@ -141,8 +224,8 @@ class MainActivity : ComponentActivity() {
                                             scope.launch {
                                                 try {
                                                     replyText = "Procesando en el PC..."
-                                                    val resp = bridgeClient.askVoice(wavBytes)
-                                                    replyText = resp.optString("response_text", "Sin respuesta")
+                                                    val resp = bridgeClient?.askVoice(wavBytes)
+                                                    replyText = resp?.optString("response_text", "Sin respuesta") ?: "Sin conexion"
                                                 } catch (e: Exception) {
                                                     replyText = "Error: ${e.message}"
                                                 }
@@ -170,12 +253,16 @@ class MainActivity : ComponentActivity() {
                         Button(onClick = {
                             scope.launch {
                                 try {
-                                    val status = bridgeClient.getPcStatus()
-                                    val cpu = status.optJSONObject("cpu")?.optDouble("load_1m", 0.0) ?: 0.0
-                                    val mem = status.optJSONObject("memory")?.optDouble("percent_used", 0.0) ?: 0.0
-                                    val disk = status.optJSONObject("disk")?.optDouble("percent_used", 0.0) ?: 0.0
-                                    val win = status.optJSONObject("active_window")?.optString("class", "Desconocida") ?: ""
-                                    pcStatusText = "CPU: $cpu | RAM: $mem% | Disco: $disk%\nVentana Hyprland: $win"
+                                    val status = bridgeClient?.getPcStatus()
+                                    if (status != null) {
+                                        val cpu = status.optJSONObject("cpu")?.optDouble("load_1m", 0.0) ?: 0.0
+                                        val mem = status.optJSONObject("memory")?.optDouble("percent_used", 0.0) ?: 0.0
+                                        val disk = status.optJSONObject("disk")?.optDouble("percent_used", 0.0) ?: 0.0
+                                        val win = status.optJSONObject("active_window")?.optString("class", "Desconocida") ?: ""
+                                        pcStatusText = "CPU: $cpu | RAM: $mem% | Disco: $disk%\nVentana Hyprland: $win"
+                                    } else {
+                                        pcStatusText = "Error: cliente no inicializado"
+                                    }
                                 } catch (e: Exception) {
                                     pcStatusText = "Error conectando: ${e.message}"
                                 }
@@ -194,8 +281,8 @@ class MainActivity : ComponentActivity() {
                         Button(onClick = {
                             scope.launch {
                                 try {
-                                    val bytes = bridgeClient.getPcScreenshot()
-                                    if (bytes.isNotEmpty()) {
+                                    val bytes = bridgeClient?.getPcScreenshot()
+                                    if (bytes != null && bytes.isNotEmpty()) {
                                         screenshotBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                                     }
                                 } catch (e: Exception) {
@@ -218,7 +305,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // 4. Portapapeles y Enlaces
+                // 4. Portapapeles
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Portapapeles del PC", style = MaterialTheme.typography.titleMedium)
@@ -234,7 +321,7 @@ class MainActivity : ComponentActivity() {
                             Button(onClick = {
                                 scope.launch {
                                     try {
-                                        val ok = bridgeClient.setPcClipboard(clipboardInput)
+                                        val ok = bridgeClient?.setPcClipboard(clipboardInput) ?: false
                                         Toast.makeText(this@MainActivity, if (ok) "Copiado al PC" else "Error", Toast.LENGTH_SHORT).show()
                                     } catch (e: Exception) {
                                         Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -246,7 +333,7 @@ class MainActivity : ComponentActivity() {
                             Button(onClick = {
                                 scope.launch {
                                     try {
-                                        val text = bridgeClient.getPcClipboard()
+                                        val text = bridgeClient?.getPcClipboard() ?: ""
                                         clipboardInput = text
                                     } catch (e: Exception) {
                                         Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -277,7 +364,7 @@ class MainActivity : ComponentActivity() {
                                     val fileName = File(filePathInput).name
                                     val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                                     val dest = File(downloadsDir, fileName)
-                                    val ok = bridgeClient.downloadPcFile(filePathInput, dest)
+                                    val ok = bridgeClient?.downloadPcFile(filePathInput, dest) ?: false
                                     Toast.makeText(
                                         this@MainActivity,
                                         if (ok) "Descargado en Descargas/$fileName" else "Fallo en descarga",
