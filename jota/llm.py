@@ -1,11 +1,19 @@
-"""LLM: interfaz con Qwen via llama-cpp-python."""
+"""LLM: interfaz con Qwen via llama-cpp-python con optimizacion de hilos y limpieza para TTS."""
 
 import logging
-from typing import Generator
+import os
+import re
+from collections.abc import Generator
 
 from llama_cpp import Llama
 
-from jota.config import LLM_MODEL, LLM_N_CTX, LLM_N_GPU_LAYERS, LLM_TEMPERATURE, SYSTEM_PROMPT
+from jota.config import (
+    LLM_MODEL,
+    LLM_N_CTX,
+    LLM_N_GPU_LAYERS,
+    LLM_TEMPERATURE,
+    SYSTEM_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,23 +28,26 @@ def load_model() -> None:
     if not LLM_MODEL.exists():
         raise FileNotFoundError(
             f"Modelo GGUF no encontrado en {LLM_MODEL}.\n"
-            "Descárgalo de HuggingFace y ajusta LLM_MODEL en config.py"
+            "Ejecuta bash setup.sh para descargarlo automaticamente."
         )
 
     logger.info("Cargando modelo LLM: %s", LLM_MODEL.name)
+    threads = min(8, os.cpu_count() or 4)
+
     _llm = Llama(
         model_path=str(LLM_MODEL),
         n_ctx=LLM_N_CTX,
         n_gpu_layers=LLM_N_GPU_LAYERS,
+        n_threads=threads,
         verbose=False,
         chat_format="chatml",  # Qwen usa ChatML
     )
-    logger.info("Modelo cargado.")
+    logger.info("Modelo cargado con %d hilos de CPU.", threads)
 
 
 def ask(prompt: str) -> str:
     """
-    Envía un prompt al LLM y devuelve la respuesta completa como string.
+    Envia un prompt al LLM y devuelve la respuesta limpia lista para TTS.
     """
     if _llm is None:
         raise RuntimeError("Modelo no cargado. Llama a load_model() primero.")
@@ -53,15 +64,32 @@ def ask(prompt: str) -> str:
         stream=False,
     )
 
-    text: str = response["choices"][0]["message"]["content"].strip()
-    logger.info("Respuesta LLM: %r", text)
+    raw_text: str = response["choices"][0]["message"]["content"].strip()
+    cleaned = clean_text_for_tts(raw_text)
+    logger.info("Respuesta LLM: %r", cleaned)
+    return cleaned
+
+
+def clean_text_for_tts(text: str) -> str:
+    """
+    Limpia simbolos de markdown y caracteres no hablados para que el
+    motor de voz (TTS) hable de forma natural y fluida.
+    """
+    # Eliminar bloques de codigo
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    # Eliminar negritas, cursivas, tachados, codigo en linea y encabezados (*, _, ~, `, #)
+    text = re.sub(r"[\*_~`#]", "", text)
+    # Eliminar vinetas de listas (- item, + item)
+    text = re.sub(r"^\s*[-+]\s+", "", text, flags=re.MULTILINE)
+    # Limpiar multiples saltos de linea o espacios
+    text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
 def ask_stream(prompt: str) -> Generator[str, None, None]:
     """
-    Versión streaming: yield de tokens para futuras integraciones.
-    Por ahora no se usa en Fase 1, pero está aquí para Fase 2.
+    Version streaming: yield de tokens para futuras integraciones.
+    Por ahora no se usa en Fase 1, pero esta disponible para Fase 2.
     """
     if _llm is None:
         raise RuntimeError("Modelo no cargado.")

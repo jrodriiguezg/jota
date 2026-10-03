@@ -1,6 +1,5 @@
-"""Tests básicos de Fase 1."""
+"""Tests basicos de Fase 1."""
 
-import pytest
 from jota.stt import strip_wake_word
 
 
