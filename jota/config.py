@@ -3,6 +3,7 @@ Configuración central de Jota.
 Edita aquí las rutas a los modelos y preferencias.
 """
 
+import shutil
 from pathlib import Path
 
 # ── Rutas de modelos ─────────────────────────────────────────────────────────
@@ -26,8 +27,6 @@ LLM_N_CTX = 2048          # contexto de tokens
 LLM_N_GPU_LAYERS = 0       # 0 = sólo CPU; -1 = todo en GPU si tienes CUDA/Vulkan
 LLM_TEMPERATURE = 0.7
 
-import shutil
-
 # TTS: piper-tts
 PIPER_BIN = Path(shutil.which("piper") or (Path.home() / ".local" / "bin" / "piper"))
 PIPER_MODEL = MODELS_DIR / "piper" / "es_ES-sharvard-medium.onnx"
@@ -46,8 +45,9 @@ AUDIO_DTYPE = "int16"
 # Duración máxima de grabación en segundos (por si no suelta la tecla)
 AUDIO_MAX_DURATION = 30
 
-# Archivo temporal donde se guarda el audio grabado
-AUDIO_TMP_FILE = Path("/tmp/jota_input.wav")
+# Directorio y archivo temporal seguro para el audio grabado
+AUDIO_TMP_DIR = Path.home() / ".local" / "share" / "jota" / "tmp"
+AUDIO_TMP_FILE = AUDIO_TMP_DIR / "input.wav"
 
 # ── Hotkey ───────────────────────────────────────────────────────────────────
 

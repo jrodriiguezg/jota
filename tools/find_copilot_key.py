@@ -11,9 +11,9 @@ Si no muestra dispositivos en tu terminal actual:
     python tools/find_copilot_key.py
 """
 
-import os
 import selectors
 import sys
+
 import evdev
 from evdev import InputDevice, categorize, ecodes
 
