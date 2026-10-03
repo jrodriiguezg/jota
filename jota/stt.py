@@ -86,12 +86,17 @@ def strip_wake_word(text: str) -> str | None:
     cleaned_start = re.sub(r"^[\s¡¿\"']+", "", text)
     normalized = cleaned_start.strip().lower()
 
-    for word in WAKE_WORDS:
-        pattern = rf"^{re.escape(word)}[\s,\.!¿?¡\"']*"
+    # Ordenar por longitud descendente para que 'jota' tenga prioridad sobre 'j'
+    sorted_words = sorted(WAKE_WORDS, key=len, reverse=True)
+
+    for word in sorted_words:
+        # Exigir delimitador de palabra (espacio, puntuación o fin de cadena)
+        pattern = rf"^{re.escape(word)}(?:[\s,\.!¿?¡\"':;\-]+|$)"
         match = re.match(pattern, normalized)
         if match:
             cleaned = cleaned_start[match.end():].strip()
-            cleaned = re.sub(r"^[\s,\.!¿?¡\"']+", "", cleaned)
+            # Quitar separadores tras el wake word (comas, espacios, exclamacion, etc.) sin borrar el signo de interrogacion
+            cleaned = re.sub(r"^[\s,\-:;!\.]+", "", cleaned)
             logger.debug("Wake word '%s' detectado. Frase limpia: %r", word, cleaned)
             return cleaned if cleaned else None
 
