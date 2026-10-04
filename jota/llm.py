@@ -53,13 +53,28 @@ def load_model() -> None:
 
 def get_effective_system_prompt() -> str:
     """
-    Devuelve el prompt del sistema configurado con la directiva de razonamiento
-    adecuada (/no_think o /think) segun LLM_ENABLE_THINKING.
+    Devuelve el prompt del sistema configurado con contexto temporal actual
+    y la directiva de razonamiento adecuada (/no_think o /think) segun LLM_ENABLE_THINKING.
     """
+    from datetime import datetime
+
+    now = datetime.now()
+    dias = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
+    meses = [
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    ]
+    dia_semana = dias[now.weekday()]
+    mes = meses[now.month - 1]
+    time_info = (
+        f"Contexto temporal del sistema: Hoy es {dia_semana}, {now.day} de {mes} de {now.year}. "
+        f"Hora local actual: {now.strftime('%H:%M')}."
+    )
     directive = "/think" if LLM_ENABLE_THINKING else "/no_think"
-    if directive in SYSTEM_PROMPT:
-        return SYSTEM_PROMPT
-    return f"{SYSTEM_PROMPT}\n{directive}"
+    prompt = f"{SYSTEM_PROMPT}\n\n{time_info}"
+    if directive in prompt:
+        return prompt
+    return f"{prompt}\n{directive}"
 
 
 def ask(prompt: str) -> str:

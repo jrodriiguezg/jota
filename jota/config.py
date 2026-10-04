@@ -291,8 +291,13 @@ Usuario: avisame en 10 minutos para la pizza
 TOOL: set_timer(seconds=600, label='la pizza')
 Iniciando temporizador de 10 minutos para la pizza.
 
-Usuario: hola como estas
-Hola, estoy listo para ayudarte.
+Usuario: que hora es
+TOOL: get_current_time(mode='time')
+Son las 14:45.
 
-Usuario: por que el cielo es azul
-El cielo es azul por la dispersion de la luz solar en la atmosfera."""
+Usuario: que dia es hoy
+TOOL: get_current_time(mode='date')
+Hoy es domingo, 4 de octubre de 2026.
+
+Usuario: hola como estas
+Hola, estoy listo para ayudarte."""

@@ -78,6 +78,14 @@ class TestFastIntentRouter:
         assert match_fast_intent("a ver la terminal") == ("open_app", {"name": "terminal"})
         assert match_fast_intent("abre dolfin") == ("open_app", {"name": "dolphin"})
 
+    def test_datetime_intents(self):
+        assert match_fast_intent("que hora es") == ("get_current_time", {"mode": "time"})
+        assert match_fast_intent("dime la hora") == ("get_current_time", {"mode": "time"})
+        assert match_fast_intent("hora actual") == ("get_current_time", {"mode": "time"})
+        assert match_fast_intent("que dia es hoy") == ("get_current_time", {"mode": "date"})
+        assert match_fast_intent("que fecha es") == ("get_current_time", {"mode": "date"})
+        assert match_fast_intent("en que dia estamos") == ("get_current_time", {"mode": "date"})
+
     def test_non_tool_intent_returns_none(self):
         assert match_fast_intent("como estas hoy") is None
         assert match_fast_intent("cual es la capital de Francia") is None
@@ -123,6 +131,13 @@ class TestLLMToolParser:
         out2 = "TOOL: websearch(query='que es una vaca')"
         assert parse_llm_tool_call(out2) == ("web_search", {"query": "que es una vaca"})
         assert parse_llm_tool_call(out) == ("web_search", {"query": "que es una vaca"})
+
+    def test_parse_datetime(self):
+        out = "TOOL: get_current_time(mode='time')\nSon las 14:45."
+        assert parse_llm_tool_call(out) == ("get_current_time", {"mode": "time"})
+
+        out2 = "TOOL: date(mode='date')"
+        assert parse_llm_tool_call(out2) == ("get_current_time", {"mode": "date"})
 
     def test_parse_no_tool(self):
         assert parse_llm_tool_call("Hola, soy Jota en que puedo ayudarte?") is None
@@ -355,6 +370,15 @@ class TestExtendedTools:
         assert ok is True
         assert "Madrid" in msg
         assert "22.5" in msg
+
+    def test_datetime_tool(self):
+        ok, msg = execute_tool("get_current_time", {"mode": "time"})
+        assert ok is True
+        assert "Son las" in msg
+
+        ok, msg = execute_tool("get_current_time", {"mode": "date"})
+        assert ok is True
+        assert "Hoy es" in msg
 
 
 
