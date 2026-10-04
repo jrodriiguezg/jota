@@ -81,9 +81,25 @@ class JotaOrbWindow(Gtk.Window):
         self.darea.connect("draw", self.on_draw)
         self.add(self.darea)
 
+        # Transparencia total a eventos de raton (click-through absoluto)
+        self.connect("realize", self._on_realize)
+
         # Timer de animacion a 60 FPS
         self._interval_ms = max(10, 1000 // ORB_FPS)
         GLib.timeout_add(self._interval_ms, self._on_tick)
+
+    def _on_realize(self, widget: Gtk.Widget) -> None:
+        """Configura la ventana como transparente al puntero del raton."""
+        gdk_win = self.get_window()
+        if gdk_win:
+            try:
+                gdk_win.set_pass_through(True)
+            except Exception:
+                pass
+            try:
+                self.input_shape_combine_region(cairo.Region())
+            except Exception:
+                pass
 
     def _configure_anchors(self) -> None:
         """Posiciona la ventana en la esquina configurada de la pantalla."""
@@ -114,15 +130,12 @@ class JotaOrbWindow(Gtk.Window):
         if clean in ("listen", "listening", "grabar", "grabando"):
             self.state = "listening"
             self.target_alpha = 1.0
-            self.show_all()
         elif clean in ("think", "thinking", "procesar", "pensando"):
             self.state = "thinking"
             self.target_alpha = 1.0
-            self.show_all()
         elif clean in ("speak", "speaking", "hablar", "hablando"):
             self.state = "speaking"
             self.target_alpha = 1.0
-            self.show_all()
         elif clean in ("idle", "hide", "ocultar", "off"):
             self.state = "idle"
             self.target_alpha = 0.0
@@ -149,8 +162,9 @@ class JotaOrbWindow(Gtk.Window):
         if self.current_alpha > 0.005:
             self.darea.queue_draw()
         elif self.state == "idle" and self.current_alpha <= 0.005:
-            self.current_alpha = 0.0
-            self.hide()
+            if self.current_alpha > 0.0:
+                self.current_alpha = 0.0
+                self.darea.queue_draw()
 
         return True
 
@@ -505,8 +519,6 @@ def main() -> None:
         run_demo(window)
 
     window.show_all()
-    if not args.demo:
-        window.hide()
 
     try:
         Gtk.main()
