@@ -79,6 +79,16 @@ AUDIO_TMP_FILE = AUDIO_TMP_DIR / "input.wav"
 COPILOT_KEY_CODE = 0x00C1
 COPILOT_KEY_CODES = {0x00C1, 0x1D8, 193, 472}
 
+# ── Indicador Visual de Pantalla (Orbe Flotante Wayland) ─────────────────────
+
+ORB_ENABLED = True
+ORB_SIZE = 140
+ORB_CORNER = "bottom_right"  # "bottom_right", "bottom_left", "top_right", "top_left"
+ORB_MARGIN_X = 28
+ORB_MARGIN_Y = 28
+ORB_FPS = 60
+ORB_SOCKET_PATH = Path("/tmp/jota_orb.sock")
+
 # ── Herramientas (Fase 2) ────────────────────────────────────────────────────
 
 VOLUME_STEP_PERCENT = 5

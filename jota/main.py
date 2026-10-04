@@ -18,6 +18,7 @@ import sys
 import threading
 
 from jota import audio, hotkey, llm, stt, tools, tts
+from jota.ui.client import OrbClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,7 +29,8 @@ logger = logging.getLogger("jota")
 
 # ── Estado global ─────────────────────────────────────────────────────────────
 
-recorder = audio.AudioRecorder()
+orb = OrbClient()
+recorder = audio.AudioRecorder(level_callback=lambda lvl: orb.set_level(lvl))
 _processing_lock = threading.Lock()
 _busy = False  # evita procesar mientras ya se esta respondiendo
 
@@ -41,6 +43,7 @@ def on_key_press() -> None:
     if _busy:
         logger.info("Jota esta ocupado, ignorando pulsacion.")
         return
+    orb.set_state("listening", 0.0)
     recorder.start()
 
 
@@ -64,9 +67,12 @@ def _process_audio() -> None:
         except Exception as e:
             logger.exception("Error procesando audio: %s", e)
             try:
+                orb.set_state("speaking")
                 tts.speak("Lo siento, ocurrio un error.")
             except Exception:
                 pass
+            finally:
+                orb.set_state("idle")
         finally:
             _busy = False
 
@@ -76,14 +82,17 @@ def _do_process() -> None:
     audio_path = recorder.stop()
     if audio_path is None:
         logger.info("Sin audio capturado.")
+        orb.set_state("idle")
         return
 
     try:
+        orb.set_state("thinking")
         # 2. Transcribir
         logger.info("Transcribiendo...")
         text = stt.transcribe(audio_path)
         if not text:
             logger.info("Transcripcion vacia.")
+            orb.set_state("idle")
             return
 
         logger.info("Escuche: %r", text)
@@ -92,6 +101,7 @@ def _do_process() -> None:
         clean = stt.strip_wake_word(text)
         if clean is None:
             logger.info("Sin wake word detectado, ignorando.")
+            orb.set_state("idle")
             return
 
         logger.info("Enviando directamente al LLM: %r", clean)
@@ -100,6 +110,7 @@ def _do_process() -> None:
         response = llm.ask(clean)
         if not response:
             logger.warning("LLM devolvio respuesta vacia.")
+            orb.set_state("idle")
             return
 
         # 5. Comprobar si el LLM emitio una llamada a herramienta
@@ -109,20 +120,25 @@ def _do_process() -> None:
             # Priorizar respuesta en lenguaje natural generada por el LLM si existe
             spoken_text = llm.clean_text_for_tts(response) or tool_msg
             if spoken_text:
+                orb.set_state("speaking")
                 tts.speak(spoken_text)
+            orb.set_state("idle")
             return
 
         # 6. Sintetizar y reproducir respuesta conversacional del LLM
         clean_response = llm.clean_text_for_tts(response)
         if clean_response:
             logger.info("Respondiendo: %r", clean_response)
+            orb.set_state("speaking")
             tts.speak(clean_response)
         else:
             logger.info("Respuesta vacia tras limpieza para TTS.")
+        orb.set_state("idle")
 
     finally:
         # Limpieza de archivo de audio temporal por privacidad y espacio
         audio_path.unlink(missing_ok=True)
+        orb.set_state("idle")
 
 
 # ── Arranque ──────────────────────────────────────────────────────────────────
@@ -131,6 +147,9 @@ def main() -> None:
     logger.info("=" * 50)
     logger.info("  Jota -- Asistente de voz local  (Fase 2)")
     logger.info("=" * 50)
+
+    # Iniciar orbe visual en segundo plano
+    orb.start()
 
     # Cargar modelo LLM (puede tardar unos segundos)
     logger.info("Cargando modelo LLM, espera un momento...")
@@ -150,6 +169,8 @@ def main() -> None:
     # Manejar Ctrl+C limpiamente
     def _shutdown(sig, frame):
         logger.info("Deteniendo Jota...")
+        orb.set_state("idle")
+        orb.quit()
         copilot.stop()
         recorder.stop()
         sys.exit(0)

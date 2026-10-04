@@ -22,12 +22,13 @@ logger = logging.getLogger(__name__)
 class AudioRecorder:
     """Graba audio del microfono mientras se llame a start() hasta stop()."""
 
-    def __init__(self):
+    def __init__(self, level_callback=None):
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
         self._lock = threading.Lock()
         self._recording = False
         self._max_blocks = int(AUDIO_MAX_DURATION * AUDIO_SAMPLE_RATE / 1024)
+        self.level_callback = level_callback
 
     @property
     def is_recording(self) -> bool:
@@ -64,6 +65,7 @@ class AudioRecorder:
         if status:
             logger.warning("Aviso en stream de audio: %s", status)
 
+        cb = self.level_callback
         with self._lock:
             if self._recording:
                 self._frames.append(indata.copy())
@@ -71,6 +73,14 @@ class AudioRecorder:
                 if len(self._frames) >= self._max_blocks:
                     logger.info("Limite de duracion de audio alcanzado (%ss).", AUDIO_MAX_DURATION)
                     self._recording = False
+
+        if cb and self._recording:
+            try:
+                # Normalizar rms / pico del buffer int16 (-32768 a 32767)
+                peak = float(np.max(np.abs(indata))) / 32768.0
+                cb(min(1.0, peak * 2.8))
+            except Exception:
+                pass
 
     def stop(self) -> Path | None:
         """
