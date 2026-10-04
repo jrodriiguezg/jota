@@ -86,6 +86,21 @@ class TestFastIntentRouter:
         assert match_fast_intent("que fecha es") == ("get_current_time", {"mode": "date"})
         assert match_fast_intent("en que dia estamos") == ("get_current_time", {"mode": "date"})
 
+    def test_screen_and_workspace_intents(self):
+        assert match_fast_intent("muestrame la pantalla del pc") == ("screenshot", {})
+        assert match_fast_intent("ver la pantalla") == ("screenshot", {})
+        assert match_fast_intent("pasa al escritorio 3") == ("switch_workspace", {"target": 3})
+        assert match_fast_intent("pasad al escritorio 3") == ("switch_workspace", {"target": 3})
+        assert match_fast_intent("cambia al escritorio 2") == ("switch_workspace", {"target": 2})
+        assert match_fast_intent("mueve la ventana al escritorio 3") == (
+            "move_to_workspace",
+            {"target": 3},
+        )
+        assert match_fast_intent("que tiempo hace hoy una albacete") == (
+            "get_weather",
+            {"city": "Albacete"},
+        )
+
     def test_non_tool_intent_returns_none(self):
         assert match_fast_intent("como estas hoy") is None
         assert match_fast_intent("cual es la capital de Francia") is None
@@ -116,6 +131,12 @@ class TestLLMToolParser:
     def test_parse_screenshot(self):
         out = "TOOL: screenshot()"
         assert parse_llm_tool_call(out) == ("screenshot", {})
+
+        out_monitor = "TOOL: screen_monitor()\nMuestro la pantalla del PC."
+        assert parse_llm_tool_call(out_monitor) == ("screenshot", {})
+
+        out_show = "TOOL: show_screen()"
+        assert parse_llm_tool_call(out_show) == ("screenshot", {})
 
     def test_parse_open_app(self):
         out = "TOOL: open_app(name='dolphin')"

@@ -438,6 +438,12 @@ class MainActivity : ComponentActivity() {
                                                     isOnline = true
                                                     refreshPcStatus()
                                                     playAudioResponse(resp)
+
+                                                    val toolExecuted = resp?.optJSONObject("tool_executed")
+                                                    val toolName = toolExecuted?.optString("name", "") ?: ""
+                                                    if (toolName in listOf("screenshot", "show_screen", "screen_monitor", "screen", "captura")) {
+                                                        openScreenshotsGallery()
+                                                    }
                                                 } catch (e: Exception) {
                                                     replyText = "Fallo de conexion: ${e.message}"
                                                     isOnline = false
@@ -481,6 +487,12 @@ class MainActivity : ComponentActivity() {
                                                 isOnline = true
                                                 refreshPcStatus()
                                                 playAudioResponse(resp)
+
+                                                val toolExecuted = resp?.optJSONObject("tool_executed")
+                                                val toolName = toolExecuted?.optString("name", "") ?: ""
+                                                if (toolName in listOf("screenshot", "show_screen", "screen_monitor", "screen", "captura")) {
+                                                    openScreenshotsGallery()
+                                                }
                                             } catch (e: Exception) {
                                                 replyText = "Error: ${e.message}"
                                             }

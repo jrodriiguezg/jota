@@ -15,15 +15,27 @@ def switch_workspace(workspace_id: int | str) -> tuple[bool, str]:
 
     target = str(workspace_id).strip()
     try:
+        # Hyprland 0.56+ (sintaxis Lua hl.dsp)
         res = subprocess.run(
+            [hyprctl, "dispatch", f"hl.dsp.focus({{ workspace = {target} }})"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode == 0 and "error" not in res.stderr.lower():
+            return True, f"Cambiado al espacio de trabajo {target}."
+
+        # Fallback clasico Hyprland <0.56
+        res_fallback = subprocess.run(
             [hyprctl, "dispatch", "workspace", target],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        if res.returncode == 0:
+        if res_fallback.returncode == 0:
             return True, f"Cambiado al espacio de trabajo {target}."
-        return False, f"Fallo al cambiar de espacio de trabajo: {res.stderr.strip()}"
+        err_msg = res.stderr.strip() or res_fallback.stderr.strip()
+        return False, f"Fallo al cambiar de espacio de trabajo: {err_msg}"
     except Exception as e:
         logger.error("Error al cambiar workspace: %s", e)
         return False, f"Error al cambiar espacio de trabajo: {e}"
@@ -37,15 +49,27 @@ def move_to_workspace(workspace_id: int | str) -> tuple[bool, str]:
 
     target = str(workspace_id).strip()
     try:
+        # Hyprland 0.56+ (sintaxis Lua hl.dsp)
         res = subprocess.run(
+            [hyprctl, "dispatch", f"hl.dsp.window.move({{ workspace = {target} }})"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode == 0 and "error" not in res.stderr.lower():
+            return True, f"Ventana movida al espacio de trabajo {target}."
+
+        # Fallback clasico Hyprland <0.56
+        res_fallback = subprocess.run(
             [hyprctl, "dispatch", "movetoworkspace", target],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        if res.returncode == 0:
+        if res_fallback.returncode == 0:
             return True, f"Ventana movida al espacio de trabajo {target}."
-        return False, f"Fallo al mover ventana: {res.stderr.strip()}"
+        err_msg = res.stderr.strip() or res_fallback.stderr.strip()
+        return False, f"Fallo al mover ventana: {err_msg}"
     except Exception as e:
         logger.error("Error al mover ventana a workspace: %s", e)
         return False, f"Error al mover ventana: {e}"

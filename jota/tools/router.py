@@ -142,6 +142,45 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     ):
         return "get_current_time", {"mode": "date"}
 
+    # 7. Ver o capturar pantalla del PC
+    if re.search(
+        r"^(muestrame|muestra|ver|ensenad?|captura|pon)\s+(la\s+)?pantalla(\s+del\s+pc)?$|^pantalla\s+del\s+pc$",
+        clean,
+    ):
+        return "screenshot", {}
+
+    # 8. Espacios de trabajo (Workspaces)
+    ws_switch = re.search(
+        r"^(pasa|pasad|pasar|cambia|cambiad|cambiar|ve|id|ir|saltar)\s+al\s+escritorio\s+(\d+)$"
+        r"|^(pasa|pasad|pasar|cambia|cambiad|ve|id)\s+a\s+workspace\s+(\d+)$"
+        r"|^(escritorio|workspace)\s+(\d+)$",
+        clean,
+    )
+    if ws_switch:
+        val = ws_switch.group(2) or ws_switch.group(4) or ws_switch.group(6)
+        return "switch_workspace", {"target": int(val)}
+
+    ws_move = re.search(
+        r"^(mueve|mueved|mover|mueva)\s+(la\s+)?ventana\s+al\s+(escritorio|workspace)\s+(\d+)$",
+        clean,
+    )
+    if ws_move:
+        val = ws_move.group(4)
+        return "move_to_workspace", {"target": int(val)}
+
+    # 9. Clima y tiempo
+    weather_match = re.search(
+        r"^(que\s+tiempo\s+hace|va\s+a\s+llover|temperatura|el\s+clima|el\s+tiempo)\s+(hoy\s+)?(en|de|para|una)?\s*([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)$",
+        clean,
+    )
+    if weather_match:
+        city_raw = weather_match.group(4).strip()
+        cleaned_city = re.sub(
+            r"^(en|de|para|una|el|la)\s+", "", city_raw, flags=re.IGNORECASE
+        ).strip()
+        if cleaned_city:
+            return "get_weather", {"city": cleaned_city.capitalize()}
+
     return None
 
 
@@ -204,8 +243,20 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         action = args.get("action", "play_pause")
         return "media_control", {"action": action}
 
-    # 3. Captura de pantalla
-    if norm_name in ("screenshot", "takescreenshot"):
+    # 3. Captura de pantalla y visualizacion de pantalla
+    if norm_name in (
+        "screenshot",
+        "takescreenshot",
+        "screenmonitor",
+        "showscreen",
+        "monitorscreen",
+        "screen",
+        "display",
+        "verpantalla",
+        "muestrapantalla",
+        "pantallapc",
+        "capturapantalla",
+    ):
         return "screenshot", {}
 
     # 4. Terminal directo
@@ -273,6 +324,9 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         "cambiarescritorio",
         "iralescritorio",
         "workspace",
+        "escritorio",
+        "pasarescritorio",
+        "pasadescritorio",
     ):
         raw_target = args.get("target") or args.get("workspace_id") or args.get("id", 1)
         try:
@@ -291,7 +345,11 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
 
     # 14. Clima y meteorologia
     if norm_name in ("getweather", "weather", "clima", "tiempo", "consultartiempo"):
-        city = args.get("city") or args.get("location") or args.get("ciudad", "Madrid")
+        city_raw = args.get("city") or args.get("location") or args.get("ciudad", "Madrid")
+        cleaned = re.sub(
+            r"^(en|de|para|una|el|la)\s+", "", str(city_raw).strip(), flags=re.IGNORECASE
+        ).strip()
+        city = cleaned if cleaned else "Madrid"
         return "get_weather", {"city": city}
 
     # 15. Notas y recordatorios
