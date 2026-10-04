@@ -290,7 +290,8 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
 
     if norm_name in ("systempower", "powercontrol", "energiacontrol"):
         action = args.get("action", "suspend")
-        return "system_power", {"action": action}
+        confirmed = args.get("confirmed", False)
+        return "system_power", {"action": action, "confirmed": confirmed}
 
     # 10. Gestion de ventanas
     if norm_name in (
@@ -422,7 +423,8 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
     if tool_name == "system_power":
         from jota.tools.system import system_power
         action = args.get("action", "suspend")
-        return system_power(action)
+        confirmed = bool(args.get("confirmed", False))
+        return system_power(action, confirmed=confirmed)
 
     if tool_name == "close_active_window":
         from jota.tools.system import close_active_window

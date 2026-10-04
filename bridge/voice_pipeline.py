@@ -67,45 +67,30 @@ def process_remote_voice(
 
         logger.info("Bridge - Peticion de voz recibida: %r", prompt)
 
-        from jota.tools import match_fast_intent
+        # 3. LLM: Inferencia creativa y seleccion de herramientas
+        llm_response = ask_llm(prompt)
+        logger.info("Bridge - Respuesta LLM: %r", llm_response)
 
+        # 4. Tool calling si el LLM emitio directiva TOOL:
         tool_result: dict[str, Any] | None = None
-        fast_intent = match_fast_intent(prompt)
-        if fast_intent:
-            tool_name, tool_args = fast_intent
-            logger.info("Bridge - Intent rapido detectado: %s con %s", tool_name, tool_args)
-            ok, msg = execute_tool(tool_name, tool_args)
+        tool_call = parse_llm_tool(llm_response)
+        if tool_call:
+            logger.info(
+                "Bridge - Ejecutando herramienta remota: %s con %s",
+                tool_call.name,
+                tool_call.args,
+            )
+            result_tuple = execute_tool(tool_call.name, tool_call.args)
             tool_result = {
-                "name": tool_name,
-                "args": tool_args,
-                "result": (ok, msg),
+                "name": tool_call.name,
+                "args": tool_call.args,
+                "result": result_tuple,
             }
-            clean_text = msg
-            llm_response = f"TOOL: {tool_name}({tool_args})\n{msg}"
-        else:
-            # 3. LLM: Inferencia
-            llm_response = ask_llm(prompt)
-            logger.info("Bridge - Respuesta LLM: %r", llm_response)
 
-            # 4. Tool calling si el LLM emitio directiva TOOL:
-            tool_call = parse_llm_tool(llm_response)
-            if tool_call:
-                logger.info(
-                    "Bridge - Ejecutando herramienta remota: %s con %s",
-                    tool_call.name,
-                    tool_call.args,
-                )
-                result_tuple = execute_tool(tool_call.name, tool_call.args)
-                tool_result = {
-                    "name": tool_call.name,
-                    "args": tool_call.args,
-                    "result": result_tuple,
-                }
-
-            # 5. Limpieza de texto para TTS y respuesta
-            clean_text = clean_text_for_tts(llm_response)
-            if not clean_text and tool_result and isinstance(tool_result["result"], tuple):
-                clean_text = tool_result["result"][1]
+        # 5. Limpieza de texto para TTS: priorizar respuesta creativa del LLM
+        clean_text = clean_text_for_tts(llm_response)
+        if not clean_text and tool_result and isinstance(tool_result["result"], tuple):
+            clean_text = tool_result["result"][1]
 
         # 6. TTS remoto y reproduccion simultanea en PC
         audio_id: str | None = None
@@ -153,44 +138,29 @@ def process_remote_text(
     clean_prompt = prompt.strip()
     logger.info("Bridge - Peticion de texto recibida: %r", clean_prompt)
 
-    from jota.tools import match_fast_intent
+    # 1. LLM: Inferencia creativa y seleccion de herramientas
+    llm_response = ask_llm(clean_prompt)
+    logger.info("Bridge - Respuesta LLM: %r", llm_response)
 
+    # 2. Tool calling si el LLM emitio directiva TOOL:
     tool_result: dict[str, Any] | None = None
-    fast_intent = match_fast_intent(clean_prompt)
-    if fast_intent:
-        tool_name, tool_args = fast_intent
-        logger.info("Bridge - Intent rapido detectado: %s con %s", tool_name, tool_args)
-        ok, msg = execute_tool(tool_name, tool_args)
+    tool_call = parse_llm_tool(llm_response)
+    if tool_call:
+        logger.info(
+            "Bridge - Ejecutando herramienta remota: %s con %s",
+            tool_call.name,
+            tool_call.args,
+        )
+        result_tuple = execute_tool(tool_call.name, tool_call.args)
         tool_result = {
-            "name": tool_name,
-            "args": tool_args,
-            "result": (ok, msg),
+            "name": tool_call.name,
+            "args": tool_call.args,
+            "result": result_tuple,
         }
-        clean_text = msg
-        llm_response = f"TOOL: {tool_name}({tool_args})\n{msg}"
-    else:
-        # 1. LLM
-        llm_response = ask_llm(clean_prompt)
-        logger.info("Bridge - Respuesta LLM: %r", llm_response)
 
-        # 2. Tool calling
-        tool_call = parse_llm_tool(llm_response)
-        if tool_call:
-            logger.info(
-                "Bridge - Ejecutando herramienta remota: %s con %s",
-                tool_call.name,
-                tool_call.args,
-            )
-            result_tuple = execute_tool(tool_call.name, tool_call.args)
-            tool_result = {
-                "name": tool_call.name,
-                "args": tool_call.args,
-                "result": result_tuple,
-            }
-
-        clean_text = clean_text_for_tts(llm_response)
-        if not clean_text and tool_result and isinstance(tool_result["result"], tuple):
-            clean_text = tool_result["result"][1]
+    clean_text = clean_text_for_tts(llm_response)
+    if not clean_text and tool_result and isinstance(tool_result["result"], tuple):
+        clean_text = tool_result["result"][1]
 
     # 3. TTS si se solicito y reproduccion simultanea en PC
     audio_id: str | None = None

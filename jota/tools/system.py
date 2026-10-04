@@ -29,14 +29,11 @@ def lock_pc() -> tuple[bool, str]:
         return False, f"Error al ejecutar hyprlock: {e}"
 
 
-def system_power(action: str) -> tuple[bool, str]:
-    """
-    Gestiona el estado de energia del PC:
-    suspend, reboot, poweroff.
-    """
-    clean_action = action.lower().strip()
-    logger.info("system_power llamado con accion: '%s'", clean_action)
+_pending_power_action: tuple[str, float] | None = None
+CONFIRMATION_TIMEOUT_SECONDS = 30.0
 
+
+def _execute_power_action(clean_action: str) -> tuple[bool, str]:
     if clean_action in ("suspend", "suspender", "dormir", "suspension"):
         try:
             subprocess.Popen(["systemctl", "suspend"])
@@ -51,14 +48,72 @@ def system_power(action: str) -> tuple[bool, str]:
         except Exception as e:
             return False, f"Fallo al reiniciar: {e}"
 
-    if clean_action in ("poweroff", "apagar", "apaga"):
+    if clean_action in ("poweroff", "apagar", "apaga", "shutdown"):
         try:
             subprocess.Popen(["systemctl", "poweroff"])
             return True, "Apagando el equipo."
         except Exception as e:
             return False, f"Fallo al apagar: {e}"
 
-    return False, f"Accion de energia '{action}' no soportada."
+    return False, f"Accion de energia '{clean_action}' no soportada."
+
+
+def system_power(action: str, confirmed: bool = False) -> tuple[bool, str]:
+    """
+    Gestiona el estado de energia del PC: suspend, reboot, poweroff.
+    SIEMPRE requiere confirmacion explicita del usuario para evitar apagados
+    o reinicios accidentales.
+    """
+    global _pending_power_action
+    import time
+
+    clean_action = action.lower().strip()
+    logger.info("system_power llamado con accion: '%s', confirmed=%s", clean_action, confirmed)
+    now = time.time()
+
+    # 1. Si el usuario confirma una accion previa
+    if clean_action in ("confirm", "confirma", "confirmar", "si", "yes"):
+        if (
+            _pending_power_action
+            and (now - _pending_power_action[1]) < CONFIRMATION_TIMEOUT_SECONDS
+        ):
+            act_to_exec = _pending_power_action[0]
+            _pending_power_action = None
+            return _execute_power_action(act_to_exec)
+        _pending_power_action = None
+        return False, "No habia ninguna accion de energia pendiente de confirmacion."
+
+    # 2. Si el usuario cancela
+    if clean_action in ("cancel", "cancela", "cancelar", "no"):
+        if _pending_power_action:
+            _pending_power_action = None
+            return True, "Accion de energia cancelada."
+        return True, "No hay ninguna accion pendiente."
+
+    # 3. Determinar accion y texto
+    if clean_action in ("reboot", "reiniciar", "reinicia"):
+        target_action = "reboot"
+        nombre_accion = "reiniciar"
+    elif clean_action in ("poweroff", "apagar", "apaga", "shutdown"):
+        target_action = "poweroff"
+        nombre_accion = "apagar"
+    elif clean_action in ("suspend", "suspender", "dormir", "suspension"):
+        target_action = "suspend"
+        nombre_accion = "suspender"
+    else:
+        return False, f"Accion de energia '{action}' no soportada."
+
+    # 4. Si viene expresamente confirmada
+    if confirmed:
+        _pending_power_action = None
+        return _execute_power_action(target_action)
+
+    # 5. Solicitar confirmacion obligatoria
+    _pending_power_action = (target_action, now)
+    return True, (
+        f"¿Estas seguro de que deseas {nombre_accion} el equipo? "
+        "Confirma diciendo 'si, confirma' para proceder."
+    )
 
 
 def close_active_window() -> tuple[bool, str]:

@@ -273,7 +273,13 @@ class TestSystemTools:
         assert parse_llm_tool_call("TOOL: lock_pc()") == ("lock_pc", {})
         assert parse_llm_tool_call("TOOL: system_power(action='suspend')") == (
             "system_power",
-            {"action": "suspend"},
+            {"action": "suspend", "confirmed": False},
+        )
+        assert parse_llm_tool_call(
+            "TOOL: system_power(action='suspend', confirmed=True)"
+        ) == (
+            "system_power",
+            {"action": "suspend", "confirmed": True},
         )
         assert parse_llm_tool_call("TOOL: close_active_window()") == (
             "close_active_window",
@@ -290,7 +296,13 @@ class TestSystemTools:
         assert ok is True
         assert "bloqueada" in msg
 
+        # Sin confirmacion previa pide confirmacion
         ok, msg = execute_tool("system_power", {"action": "suspend"})
+        assert ok is True
+        assert "Estas seguro" in msg
+
+        # Con confirmacion procede a suspender
+        ok, msg = execute_tool("system_power", {"action": "suspend", "confirmed": True})
         assert ok is True
         assert "Suspendiendo" in msg
 
