@@ -61,22 +61,24 @@ class OrbClient:
             curr_pp = env.get("PYTHONPATH", "")
             env["PYTHONPATH"] = f"{project_root}:{curr_pp}" if curr_pp else project_root
 
+            log_path = Path("/tmp/jota_orb.log")
+            log_file = open(log_path, "a")
             self._proc = subprocess.Popen(
                 [python_bin, "-m", "jota.ui.orb"],
                 env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=log_file,
                 start_new_session=True,
             )
 
-            # Esperar a que el socket este listo
-            for _ in range(20):
+            # Esperar a que el socket este listo (hasta 2.5 segundos)
+            for _ in range(50):
                 time.sleep(0.05)
                 if self._is_server_listening():
                     logger.info("Orbe visual conectado y listo.")
                     return True
 
-            logger.warning("El socket del orbe no estuvo listo a tiempo.")
+            logger.warning("El socket del orbe no estuvo listo a tiempo. Revisa /tmp/jota_orb.log")
             return False
         except Exception as e:
             logger.error("No se pudo iniciar el orbe visual: %s", e)
