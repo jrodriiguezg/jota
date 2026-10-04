@@ -25,13 +25,23 @@ WHISPER_MODEL = MODELS_DIR / "whisper" / "ggml-small.bin"
 # Idioma de reconocimiento
 WHISPER_LANG = "es"
 
-# LLM: modelo GGUF de Qwen (por defecto Qwen3-0.6B)
-_default_qwen = MODELS_DIR / "qwen" / "Qwen3-0.6B-Q8_0.gguf"
-_found_ggufs = sorted(
-    (MODELS_DIR / "qwen").glob("*.gguf"),
-    key=lambda p: (not p.name.startswith("Qwen3"), p.name),
-) if (MODELS_DIR / "qwen").exists() else []
-LLM_MODEL = _found_ggufs[0] if _found_ggufs else _default_qwen
+# LLM: seleccion dinamica del modelo GGUF mas capaz disponible
+def _resolve_llm_model() -> Path:
+    env_model = os.getenv("JOTA_LLM_MODEL")
+    if env_model and Path(env_model).is_file():
+        return Path(env_model)
+
+    qwen_dir = MODELS_DIR / "qwen"
+    if qwen_dir.exists():
+        ggufs = list(qwen_dir.glob("*.gguf"))
+        if ggufs:
+            # Ordenar por tamano de archivo descendente para elegir el modelo de mayor capacidad
+            ggufs.sort(key=lambda p: p.stat().st_size, reverse=True)
+            return ggufs[0]
+    return MODELS_DIR / "qwen" / "Qwen3-0.6B-Q8_0.gguf"
+
+
+LLM_MODEL = _resolve_llm_model()
 LLM_N_CTX = 2048          # contexto de tokens
 LLM_N_GPU_LAYERS = 0       # 0 = sólo CPU; -1 = todo en GPU si tienes CUDA/Vulkan
 
@@ -131,7 +141,16 @@ APP_ALIASES = {
     "navegador": "firefox",
     "navegador web": "firefox",
     "firefox": "firefox",
+    "fire fox": "firefox",
+    "fire folks": "firefox",
+    "fire folk": "firefox",
+    "faierfox": "firefox",
+    "faier fox": "firefox",
+    "fayerfox": "firefox",
+    "fayer fox": "firefox",
     "google chrome": "google-chrome",
+    "chrome": "google-chrome",
+    "crom": "google-chrome",
     "chromium": "chromium",
     # Terminal
     "terminal": "kitty",
@@ -150,7 +169,7 @@ Catálogo estricto de herramientas disponibles:
 - screenshot(): Captura y muestra la pantalla del PC ("muestrame la pantalla del pc").
 - switch_workspace(target=N): Cambia de escritorio ("pasa al escritorio 3").
 - move_to_workspace(target=N): Mueve la ventana activa ("mueve la ventana al 3").
-- open_app(name='...'): Abre aplicacion (terminal, feishin, dolphin, firefox).
+- open_app(name='...'): Abre aplicacion (ej: 'firefox' ante 'fire folks', 'kitty', 'dolphin').
 - volume_control(action='up'|'down'|'mute'): Sube, baja o silencia el audio.
 - media_control(action='play'|'pause'|'next'|'previous'): Control multimedia.
 - web_search(query='...'): Busca en la web.
