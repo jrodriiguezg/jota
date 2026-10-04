@@ -104,16 +104,6 @@ def _do_process() -> None:
             orb.set_state("idle")
             return
 
-        # 3.5 Intent directo / rapido (<10ms para hora, volumen, multimedia, etc.)
-        fast_handled, fast_msg = tools.handle_intent(clean)
-        if fast_handled:
-            logger.info("Intent rapido ejecutado: %s", fast_msg)
-            if fast_msg:
-                orb.set_state("speaking")
-                tts.speak(fast_msg)
-            orb.set_state("idle")
-            return
-
         logger.info("Enviando directamente al LLM: %r", clean)
 
         # 4. Consultar directamente al LLM (Qwen deduce la intencion)

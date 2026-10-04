@@ -6,11 +6,14 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
 import org.json.JSONObject
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -71,6 +74,7 @@ class MainActivity : ComponentActivity() {
         bridgeClient = BridgeClient(this, serverUrl, apiKey, deviceId)
 
         checkPermissions()
+        handleIncomingIntent(intent)
 
         setContent {
             MaterialTheme(
@@ -132,6 +136,98 @@ class MainActivity : ComponentActivity() {
         bridgeClient = BridgeClient(this, serverUrl, apiKey, deviceId)
         startBridgeService()
         Toast.makeText(this, "Ajustes guardados. Reconectando...", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action
+
+        if (Intent.ACTION_SEND == action) {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (!text.isNullOrBlank()) {
+                handleSharedText(text.trim())
+            }
+            @Suppress("DEPRECATION")
+            val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            if (uri != null) {
+                handleSharedUri(uri)
+            }
+        } else if (Intent.ACTION_SEND_MULTIPLE == action) {
+            @Suppress("DEPRECATION")
+            val uris = intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+            uris?.forEach { uri ->
+                handleSharedUri(uri)
+            }
+        }
+    }
+
+    private fun handleSharedText(text: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val client = bridgeClient ?: BridgeClient(this@MainActivity, serverUrl, apiKey, deviceId)
+            val isUrl = text.startsWith("http://") || text.startsWith("https://")
+            if (isUrl) {
+                val (resUrl, msgUrl) = client.openUrlOnPc(text)
+                client.setPcClipboard(text)
+                withContext(Dispatchers.Main) {
+                    if (resUrl) {
+                        Toast.makeText(this@MainActivity, "Enlace abierto en el PC", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "Error al abrir enlace: $msgUrl", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } else {
+                val resClip = client.setPcClipboard(text)
+                withContext(Dispatchers.Main) {
+                    if (resClip) {
+                        Toast.makeText(this@MainActivity, "Texto copiado al portapapeles del PC", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "Error enviando texto al PC", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun handleSharedUri(uri: Uri) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val client = bridgeClient ?: BridgeClient(this@MainActivity, serverUrl, apiKey, deviceId)
+            var fileName = "archivo_compartido_${System.currentTimeMillis()}"
+            try {
+                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1 && cursor.moveToFirst()) {
+                        val name = cursor.getString(nameIndex)
+                        if (!name.isNullOrBlank()) {
+                            fileName = name
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+
+            try {
+                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes != null && bytes.isNotEmpty()) {
+                    val (ok, msg) = client.uploadFileToPc(fileName, bytes)
+                    withContext(Dispatchers.Main) {
+                        if (ok) {
+                            Toast.makeText(this@MainActivity, "Enviado al PC: $fileName", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(this@MainActivity, "Error enviando archivo: $msg", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Error leyendo archivo: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     @OptIn(ExperimentalMaterial3Api::class)

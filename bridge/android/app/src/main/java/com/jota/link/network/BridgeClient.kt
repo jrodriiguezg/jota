@@ -306,6 +306,38 @@ class BridgeClient(
         }
     }
 
+    suspend fun uploadFileToPc(filename: String, fileBytes: ByteArray): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        try {
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart(
+                    "file",
+                    filename,
+                    fileBytes.toRequestBody("application/octet-stream".toMediaType())
+                )
+                .build()
+
+            val request = Request.Builder()
+                .url("$baseUrl/api/v1/pc/upload")
+                .header("X-Bridge-Key", apiKey)
+                .post(requestBody)
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                Pair(true, "Archivo enviado al PC con exito")
+            } else {
+                Pair(false, "Error del servidor: ${response.code}")
+            }
+        } catch (e: Exception) {
+            Pair(false, e.message ?: "Fallo de red al enviar archivo")
+        }
+    }
+
+    suspend fun openUrlOnPc(url: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        executePcAction("open_url:$url")
+    }
+
     fun disconnect() {
         webSocket?.close(1000, "App closed")
         webSocket = null

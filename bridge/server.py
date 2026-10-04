@@ -242,6 +242,44 @@ def pc_download_file(path: str = Query(..., description="Ruta absoluta o relativ
         raise HTTPException(status_code=403, detail=str(e))
 
 
+@app.post("/api/v1/pc/upload", dependencies=[Depends(verify_auth)])
+async def pc_upload_file(file: UploadFile = File(...)):
+    """
+    Recibe un archivo o imagen compartido desde el movil y lo guarda en ~/Descargas o ~/Downloads.
+    """
+    try:
+        downloads_dir = Path.home() / "Descargas"
+        if not downloads_dir.exists():
+            downloads_dir = Path.home() / "Downloads"
+            downloads_dir.mkdir(parents=True, exist_ok=True)
+
+        filename = Path(file.filename or "archivo_movil").name
+        dest_path = downloads_dir / filename
+        counter = 1
+        stem = dest_path.stem
+        suffix = dest_path.suffix
+        while dest_path.exists():
+            dest_path = downloads_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+
+        content = await file.read()
+        dest_path.write_bytes(content)
+
+        from jota.tools.system import send_desktop_notification
+
+        send_desktop_notification("JotaLink", f"Archivo recibido del movil: {dest_path.name}")
+
+        return {
+            "success": True,
+            "filename": dest_path.name,
+            "path": str(dest_path),
+            "size_bytes": len(content),
+        }
+    except Exception as e:
+        logger.error("Error al recibir archivo del movil: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Endpoints de Invocacion de Jota (Voz y Texto) ─────────────────────────────
 
 

@@ -376,4 +376,12 @@ def execute_pc_action(action: str) -> tuple[bool, str]:
     if clean_act in ("previous", "prev", "prev_track"):
         return playback_control("previous")
 
+    if clean_act.startswith("open_url:"):
+        url = action.split(":", 1)[1].strip()
+        try:
+            subprocess.Popen(["xdg-open", url])
+            return True, f"Abriendo enlace en el navegador: {url}"
+        except Exception as e:
+            return False, f"Error al abrir URL: {e}"
+
     return False, f"Accion no reconocida: {action}"
