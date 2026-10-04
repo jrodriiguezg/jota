@@ -129,6 +129,19 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         app_target = open_app_match.group(4).strip()
         return "open_app", {"name": app_target}
 
+    # 6. Hora y fecha del sistema
+    if re.search(
+        r"^(que\s+hora\s+es|dime\s+la\s+hora|hora(\s+actual)?|que\s+hora\s+tienes)$",
+        clean,
+    ):
+        return "get_current_time", {"mode": "time"}
+
+    if re.search(
+        r"^(que\s+dia\s+es(\s+hoy)?|que\s+fecha\s+es(\s+hoy)?|en\s+que\s+dia\s+estamos|cual\s+es\s+la\s+fecha)$",
+        clean,
+    ):
+        return "get_current_time", {"mode": "date"}
+
     return None
 
 
@@ -301,6 +314,11 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         label = args.get("label", "temporizador")
         return "set_timer", {"seconds": seconds, "label": label}
 
+    # 17. Hora y fecha del sistema
+    if norm_name in ("getcurrenttime", "currenttime", "time", "hora", "fechahora", "date"):
+        mode = args.get("mode", "time")
+        return "get_current_time", {"mode": mode}
+
     return None
 
 
@@ -392,5 +410,10 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         seconds = int(args.get("seconds", 60))
         label = args.get("label", "temporizador")
         return set_timer(seconds, label)
+
+    if tool_name == "get_current_time":
+        from jota.tools.datetime_tool import get_current_time
+        mode = args.get("mode", "time")
+        return get_current_time(mode)
 
     return False, f"Herramienta no implementada: {tool_name}"
