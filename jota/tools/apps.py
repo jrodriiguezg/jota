@@ -62,8 +62,17 @@ def resolve_app_target(raw_target: str) -> tuple[str, str]:
         resolved = DEFAULT_MIME_TYPES[clean]
         friendly = clean.replace("_", " ").capitalize()
     else:
-        resolved = clean
-        friendly = clean.capitalize()
+        # 4. Busqueda aproximada para tolerar fallos foneticos de STT
+        import difflib
+
+        close = difflib.get_close_matches(clean, APP_ALIASES.keys(), n=1, cutoff=0.7)
+        if close:
+            best_match = close[0]
+            resolved = APP_ALIASES[best_match]
+            friendly = best_match.capitalize()
+        else:
+            resolved = clean
+            friendly = clean.capitalize()
 
     # Si es un MIME type (contiene '/'), resolver la aplicacion por defecto del sistema
     if "/" in resolved:

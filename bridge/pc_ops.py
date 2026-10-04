@@ -16,6 +16,7 @@ from typing import Any
 from bridge.config import (
     ALLOWED_ROOT_PATHS,
     FORBIDDEN_PATH_PARTS,
+    HOME_PATH,
     MAX_FILE_DOWNLOAD_BYTES,
 )
 
@@ -310,16 +311,24 @@ def resolve_safe_file_path(requested_path: str) -> Path:
     if not requested_path or not requested_path.strip():
         raise ValueError("Ruta de archivo vacia.")
 
-    # Expandir tilde y resolver ruta canonica absoluta
-    raw_path = Path(os.path.expanduser(requested_path.strip()))
-    try:
-        resolved = raw_path.resolve(strict=True)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"El archivo no existe: {requested_path}")
+    # Expandir tilde y resolver ruta canonica
+    clean_str = os.path.expanduser(requested_path.strip())
+    raw_path = Path(clean_str)
 
-    # Validar que sea un archivo regular
+    if not raw_path.is_absolute():
+        candidate = (HOME_PATH / raw_path).resolve()
+        if not candidate.is_file():
+            cwd_cand = (Path.cwd() / raw_path).resolve()
+            if cwd_cand.is_file():
+                candidate = cwd_cand
+            else:
+                candidate = (SCREENSHOTS_DIR / clean_str).resolve()
+        resolved = candidate
+    else:
+        resolved = raw_path.resolve()
+
     if not resolved.is_file():
-        raise ValueError(f"La ruta indicada no es un archivo regular: {requested_path}")
+        raise FileNotFoundError(f"El archivo no existe: {requested_path}")
 
     # Validar que este dentro de una raiz permitida
     is_under_allowed_root = any(
