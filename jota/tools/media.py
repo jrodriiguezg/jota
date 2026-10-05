@@ -132,6 +132,46 @@ def playback_control(action: str) -> tuple[bool, str]:
         logger.info("Reproduccion multimedia: %s", ok_message)
         return True, ok_message
 
+    # Si playerctl falla en reproducir porque no hay reproductor abierto, intentar abrir el predeterminado
+    if action in ("play", "play_pause", "toggle"):
+        try:
+            from jota.tools.apps import launch_application
+            ok, msg = launch_application("musica")
+            if ok:
+                return True, "Iniciando reproductor de musica."
+        except Exception as e:
+            logger.debug("Error al lanzar reproductor como fallback: %s", e)
+
     # Si playerctl falla porque no hay reproductores
     logger.warning("Fallo en playerctl %s: %s", cmd_action, res.stderr.strip())
     return False, "No hay ningun reproductor multimedia activo."
+
+
+
+def get_now_playing() -> tuple[bool, str]:
+    """Consulta la cancion o pista multimedia que esta sonando actualmente."""
+    if not shutil.which("playerctl"):
+        return False, "playerctl no esta instalado en el sistema."
+
+    try:
+        format_str = "{{playerName}}\t{{title}}\t{{artist}}"
+        proc = _run_cmd(["playerctl", "metadata", "--format", format_str])
+        if proc.returncode == 0 and proc.stdout.strip():
+            parts = proc.stdout.strip().split("\t")
+            player = parts[0] if len(parts) >= 1 else ""
+            title = parts[1] if len(parts) >= 2 else ""
+            artist = parts[2] if len(parts) >= 3 else ""
+
+            if title and artist:
+                msg = f"Esta sonando {title} de {artist}."
+            elif title:
+                msg = f"Esta sonando {title}."
+            else:
+                msg = f"Reproduciendo contenido en {player}."
+
+            return True, msg
+        return True, "No hay ninguna pista reproduciendose en este momento."
+    except Exception as e:
+        logger.debug("Error leyendo cancion actual: %s", e)
+        return False, "No se pudo obtener informacion de la cancion."
+

@@ -11,8 +11,10 @@ logger = logging.getLogger(__name__)
 
 
 def _clean_app_query(query: str) -> str:
-    """Limpia el texto de peticion para extraer el nombre o categoria de la app."""
-    text = query.lower().strip()
+    """Limpia y sanea el texto de peticion para extraer el nombre o categoria de la app."""
+    # Eliminar metacaracteres peligrosos de inyeccion shell
+    sanitized = re.sub(r"[;&|`$<>\n\r]", "", query)
+    text = sanitized.lower().strip()
     # Eliminar articulos y frases introductorias
     pattern = r"^(por favor\s+|puedes\s+)?(abrir|abre|lanza|lanzar|ejecuta|ejecutar)\s+"
     text = re.sub(pattern, "", text)

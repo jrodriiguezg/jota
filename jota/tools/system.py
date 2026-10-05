@@ -190,5 +190,33 @@ def get_pc_summary() -> tuple[bool, str]:
     if active_app:
         msg_parts.append(f"la ventana activa es {active_app}")
 
+    # 4. Estado de bateria si el equipo es portatil
+    try:
+        from bridge.pc_ops import get_battery_status
+
+        bat = get_battery_status()
+        if bat.get("present") and bat.get("percent") is not None:
+            pct = bat["percent"]
+            chg = "cargando" if bat.get("charging") else "en bateria"
+            msg_parts.append(f"bateria al {pct}% ({chg})")
+    except Exception:
+        pass
+
     spoken = "El equipo tiene " + ", ".join(msg_parts) + "."
     return True, spoken
+
+
+def get_pc_battery() -> tuple[bool, str]:
+    """Consulta la bateria del PC y devuelve un mensaje en lenguaje natural."""
+    from bridge.pc_ops import get_battery_status
+
+    batt = get_battery_status()
+    if not batt.get("present"):
+        return True, "Este equipo funciona conectado a la red electrica y no tiene bateria."
+
+    pct = batt.get("percent")
+    chg = "esta conectado al cargador" if batt.get("charging") else "no esta cargando"
+    if pct is not None:
+        return True, f"Al ordenador le queda un {pct}% de bateria y {chg}."
+    return True, "No se pudo leer el nivel exacto de la bateria del PC."
+

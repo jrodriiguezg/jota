@@ -104,14 +104,26 @@ def _do_process() -> None:
             orb.set_state("idle")
             return
 
-        logger.info("Enviando directamente al LLM: %r", clean)
+        # Fast intent bypass: ejecutar acciones directas (volumen, multimedia, apps, reloj, clima, etc.)
+        # sin despertar el LLM, reduciendo latencia a <1ms y consumo de CPU a 0%.
+        fast_handled, fast_msg = tools.handle_intent(clean)
+        if fast_handled:
+            logger.info("Accion rapida resuelta sin LLM: %s", fast_msg)
+            if fast_msg:
+                orb.set_state("speaking")
+                tts.speak(fast_msg)
+            orb.set_state("idle")
+            return
 
-        # 4. Consultar directamente al LLM (Qwen deduce la intencion)
+        logger.info("Enviando al LLM: %r", clean)
+
+        # 4. Consultar al LLM (Qwen deduce la intencion)
         response = llm.ask(clean)
         if not response:
             logger.warning("LLM devolvio respuesta vacia.")
             orb.set_state("idle")
             return
+
 
         # 5. Comprobar si el LLM emitio una llamada a herramienta
         tool_handled, tool_msg = tools.handle_llm_output(response)

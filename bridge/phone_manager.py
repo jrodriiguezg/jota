@@ -6,6 +6,7 @@ y el almacenamiento del estado reportado (bateria, conectividad).
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from starlette.websockets import WebSocket, WebSocketState
@@ -26,15 +27,22 @@ class PhoneConnectionManager:
     async def register(
         self, device_id: str, websocket: WebSocket, metadata: dict[str, Any] | None = None
     ) -> None:
-        """Registra una nueva conexion de dispositivo Android."""
+        """Registra una nueva conexion de dispositivo Android cerrando sockets previos huérfanos."""
         async with self._lock:
+            old_ws = self._connections.get(device_id)
+            if old_ws and old_ws != websocket:
+                try:
+                    await old_ws.close(code=1000)
+                except Exception:
+                    pass
             self._connections[device_id] = websocket
             self._device_info[device_id] = {
                 "device_id": device_id,
                 "model": (metadata or {}).get("model", "Android Device"),
                 "battery": (metadata or {}).get("battery", None),
                 "is_charging": (metadata or {}).get("is_charging", False),
-                "connected_at": asyncio.get_event_loop().time(),
+                "connected_at": time.time(),
+                "last_seen": time.time(),
             }
         logger.info("Dispositivo Android conectado al Bridge: '%s'", device_id)
 
@@ -66,6 +74,7 @@ class PhoneConnectionManager:
         if device_id not in self._device_info:
             self._device_info[device_id] = {"device_id": device_id}
         self._device_info[device_id].update(status_data)
+        self._device_info[device_id]["last_seen"] = time.time()
         logger.debug("Estado de '%s' actualizado: %s", device_id, status_data)
 
     def get_device_status(self, device_id: str | None = None) -> dict[str, Any]:
@@ -153,6 +162,16 @@ class PhoneConnectionManager:
                 "remote_path": remote_path,
                 "size_bytes": size_bytes,
             },
+            device_id=device_id,
+        )
+
+    async def broadcast_notification(
+        self, title: str, message: str, device_id: str | None = None
+    ) -> bool:
+        """Envia una notificacion de escritorio del PC a dispositivos moviles."""
+        return await self.send_event(
+            "pc_notification",
+            {"title": title, "message": message},
             device_id=device_id,
         )
 

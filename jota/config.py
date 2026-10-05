@@ -25,7 +25,7 @@ WHISPER_MODEL = MODELS_DIR / "whisper" / "ggml-small.bin"
 # Idioma de reconocimiento
 WHISPER_LANG = "es"
 
-# LLM: seleccion dinamica del modelo GGUF mas capaz disponible
+# LLM: seleccion del modelo optimizado para consumo ligero y baja latencia
 def _resolve_llm_model() -> Path:
     env_model = os.getenv("JOTA_LLM_MODEL")
     if env_model and Path(env_model).is_file():
@@ -33,17 +33,36 @@ def _resolve_llm_model() -> Path:
 
     qwen_dir = MODELS_DIR / "qwen"
     if qwen_dir.exists():
+        profile = os.getenv("JOTA_LLM_PROFILE", "lightweight").lower()
+        if profile in ("light", "lightweight", "fast"):
+            # Priorizar modelos ligeros de bajo consumo y respuesta rapida (<1s)
+            for preferred in (
+                "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+                "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+                "Qwen3-0.6B-Q8_0.gguf",
+            ):
+                candidate = qwen_dir / preferred
+                if candidate.is_file():
+                    return candidate
+
+        # Perfil quality: ordenar por tamano descendente
         ggufs = list(qwen_dir.glob("*.gguf"))
         if ggufs:
-            # Ordenar por tamano de archivo descendente para elegir el modelo de mayor capacidad
-            ggufs.sort(key=lambda p: p.stat().st_size, reverse=True)
+            ggufs.sort(key=lambda p: p.stat().st_size, reverse=(profile in ("quality", "heavy")))
             return ggufs[0]
-    return MODELS_DIR / "qwen" / "Qwen3-0.6B-Q8_0.gguf"
+
+    return MODELS_DIR / "qwen" / "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+
 
 
 LLM_MODEL = _resolve_llm_model()
-LLM_N_CTX = 2048          # contexto de tokens
-LLM_N_GPU_LAYERS = 0       # 0 = sólo CPU; -1 = todo en GPU si tienes CUDA/Vulkan
+LLM_N_CTX = int(os.getenv("JOTA_LLM_CTX", "2048"))          # contexto optimizado para asistente de voz y catalogo
+LLM_N_GPU_LAYERS = int(os.getenv("JOTA_LLM_GPU_LAYERS", "0"))
+LLM_THREADS = int(os.getenv("JOTA_LLM_THREADS", "4"))       # limitar hilos para evitar saturar la CPU al 99%
+
+# Backend LLM nativo autonomo (100% local via llama-cpp-python, sin Ollama)
+LLM_BACKEND = "llama_cpp"
+
 
 # Parametros de muestreo para ejecucion precisa de herramientas:
 LLM_TEMPERATURE = 0.1
@@ -131,12 +150,15 @@ APP_ALIASES = {
     "explorer": "inode/directory",
     # Musica y multimedia
     "reproductor de musica": "org.jeffvli.feishin",
+    "reproductor de música": "org.jeffvli.feishin",
     "reproductor multimedia": "org.jeffvli.feishin",
     "reproductor de audio": "org.jeffvli.feishin",
     "reproductor": "org.jeffvli.feishin",
     "musica": "org.jeffvli.feishin",
+    "música": "org.jeffvli.feishin",
     "feishin": "org.jeffvli.feishin",
     "feisfin": "org.jeffvli.feishin",
+
     # Navegadores
     "navegador": "firefox",
     "navegador web": "firefox",
@@ -169,7 +191,7 @@ Catálogo estricto de herramientas disponibles:
 - screenshot(): Captura y muestra la pantalla del PC ("muestrame la pantalla del pc").
 - switch_workspace(target=N): Cambia de escritorio ("pasa al escritorio 3").
 - move_to_workspace(target=N): Mueve la ventana activa ("mueve la ventana al 3").
-- open_app(name='...'): Abre aplicacion (ej: 'firefox' ante 'fire folks', 'kitty', 'dolphin').
+- open_app(name='...'): Abre aplicacion (ej: 'musica' o 'feishin' ante reproductor de musica, 'dolphin' ante explorador de archivos, 'firefox', 'terminal').
 - volume_control(action='up'|'down'|'mute'): Sube, baja o silencia el audio.
 - media_control(action='play'|'pause'|'next'|'previous'): Control multimedia.
 - web_search(query='...'): Busca en la web.
@@ -178,27 +200,42 @@ Catálogo estricto de herramientas disponibles:
 - system_power(action='suspend'|'reboot'|'shutdown'): Control de energia del equipo.
 - close_active_window(): Cierra la ventana activa.
 - pc_summary(): Consulta estado del PC (CPU, RAM, disco).
+- get_pc_battery(): Consulta bateria del PC ("cuanta bateria le queda al pc").
+- get_now_playing(): Consulta la cancion que esta sonando ("que cancion esta sonando").
 - send_notification(title='...', message='...'): Notificacion de escritorio.
 - get_weather(city='...'): Clima de una ciudad (ej: 'Albacete').
-- manage_notes(action='add'|'list'|'clear', text='...'): Gestiona notas.
+- manage_notes(action='add'|'list'|'clear'|'search', text='...', query='...'): Gestiona o busca notas.
 - set_timer(seconds=N, label='...'): Inicia un temporizador.
+- cancel_timer(): Cancela temporizadores activos.
 - get_current_time(mode='time'|'date'|'full'): Consulta hora o fecha del sistema.
+- analyze_screen(question='...'): Analiza visualmente la pantalla con el modelo de vision ("que error sale en la terminal", "explicame que tengo en pantalla").
 
 REGLAS CRÍTICAS:
 1. SOLO puedes llamar a herramientas del catalogo. No inventes herramientas inexistentes.
 2. Reanudar musica/audio: usa SIEMPRE TOOL: media_control(action='play'). JAMAS uses system_power.
 3. Reiniciar o apagar: JAMAS apagues o reinicies sin confirmacion previa. Pregunta primero.
-4. Si el usuario pide ver la pantalla del PC, usa TOOL: screenshot().
-5. Si el usuario pide pasar de escritorio, usa TOOL: switch_workspace(target=N).
-6. Si el usuario quiere ejecutar una accion, responde EXACTAMENTE en este formato:
+4. Si el usuario pide que cancion suena, usa TOOL: get_now_playing().
+5. Si el usuario pide la bateria del PC, usa TOOL: get_pc_battery().
+6. Si el usuario pide ver la pantalla del PC, usa TOOL: screenshot().
+7. Si el usuario pide pasar de escritorio, usa TOOL: switch_workspace(target=N).
+8. Si el usuario quiere ejecutar una accion, responde EXACTAMENTE en este formato:
 TOOL: <nombre>(<parametros>)
 <mensaje breve para decir en voz alta>
-7. Si el usuario hace una pregunta general conversacional, responde breve y sin TOOL.
+9. Si el usuario hace una pregunta general conversacional, responde breve y sin TOOL.
 
 Ejemplos:
+Usuario: abre el reproductor de musica
+TOOL: open_app(name='musica')
+Abriendo el reproductor de musica.
+
+Usuario: abre la musica
+TOOL: open_app(name='musica')
+Abriendo el reproductor de musica.
+
 Usuario: reanuda la reproduccion
 TOOL: media_control(action='play')
 Reanudando la reproduccion.
+
 
 Usuario: reinicia el equipo
 ¿Estas seguro de que deseas reiniciar el equipo? Di "si, confirma" para proceder.

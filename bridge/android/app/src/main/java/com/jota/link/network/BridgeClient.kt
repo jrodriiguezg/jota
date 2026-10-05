@@ -34,6 +34,7 @@ class BridgeClient(
         fun onTorch(enabled: Boolean)
         fun onSilent(silent: Boolean)
         fun onReceiveFile(filename: String, remotePath: String, sizeBytes: Long)
+        fun onPcNotification(title: String, message: String) {}
     }
 
     var listener: BridgeListener? = null
@@ -86,6 +87,11 @@ class BridgeClient(
                             val sizeBytes = payload.optLong("size_bytes", 0L)
                             listener?.onReceiveFile(filename, remotePath, sizeBytes)
                         }
+                        "pc_notification" -> {
+                            val title = payload.optString("title", "Jota (PC)")
+                            val message = payload.optString("message", "")
+                            listener?.onPcNotification(title, message)
+                        }
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -108,10 +114,19 @@ class BridgeClient(
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val batteryPct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
 
+        var isCharging = false
+        try {
+            val ifilter = android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+            val batteryStatus: android.content.Intent? = context.registerReceiver(null, ifilter)
+            val status: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        } catch (_: Exception) {}
+
         val payload = JSONObject().apply {
             put("event", "status_update")
             put("payload", JSONObject().apply {
                 put("battery", batteryPct)
+                put("is_charging", isCharging)
                 put("model", android.os.Build.MODEL)
             })
         }
@@ -178,6 +193,19 @@ class BridgeClient(
     }
 
     suspend fun executePcAction(action: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        // Envio directo y de baja latencia por WebSocket si la conexion esta activa
+        if (isConnected && webSocket != null) {
+            val json = JSONObject().apply {
+                put("event", "pc_action")
+                put("payload", JSONObject().apply { put("action", action) })
+            }
+            val sent = webSocket?.send(json.toString()) ?: false
+            if (sent) {
+                return@withContext Pair(true, "Comando enviado via WebSocket")
+            }
+        }
+
+        // Fallback HTTP
         val json = JSONObject().apply { put("action", action) }
         val request = Request.Builder()
             .url("$baseUrl/api/v1/pc/action")
@@ -204,9 +232,13 @@ class BridgeClient(
         JSONObject(bodyStr)
     }
 
-    suspend fun getPcScreenshot(): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun getPcScreenshot(
+        format: String = "jpeg",
+        quality: Int = 75,
+        scale: Float = 0.8f
+    ): ByteArray = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url("$baseUrl/api/v1/pc/screenshot")
+            .url("$baseUrl/api/v1/pc/screenshot?format=$format&quality=$quality&scale=$scale")
             .header("X-Bridge-Key", apiKey)
             .get()
             .build()
@@ -285,6 +317,32 @@ class BridgeClient(
 
         val response = httpClient.newCall(request).execute()
         response.isSuccessful
+    }
+
+    fun sendClipboard(text: String): Boolean {
+        if (!isConnected || webSocket == null) return false
+        val json = JSONObject().apply {
+            put("event", "clipboard")
+            put("payload", JSONObject().apply {
+                put("text", text)
+            })
+        }
+        return webSocket?.send(json.toString()) ?: false
+    }
+
+    suspend fun getPcNetworkInfo(): JSONObject = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$baseUrl/api/v1/pc/network")
+                .header("X-Bridge-Key", apiKey)
+                .get()
+                .build()
+            val response = httpClient.newCall(request).execute()
+            val bodyStr = response.body?.string() ?: "{}"
+            JSONObject(bodyStr)
+        } catch (e: Exception) {
+            JSONObject()
+        }
     }
 
     suspend fun downloadPcFile(remotePath: String, destFile: File): Boolean = withContext(Dispatchers.IO) {
