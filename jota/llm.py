@@ -1,4 +1,4 @@
-"""LLM: interfaz nativa y autonoma con Qwen via llama-cpp-python con optimizacion de memoria y guardarailes."""
+"""LLM: interfaz nativa con Qwen via llama-cpp-python con optimizacion y guardarailes."""
 
 import logging
 import os

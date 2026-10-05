@@ -278,6 +278,40 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     if notes_search:
         return "manage_notes", {"action": "search", "query": notes_search.group(3).strip()}
 
+    # 15. Verificacion de paquetes y software en el sistema
+    reserved_pkg_words = {
+        "cancion", "canción", "musica", "música", "volumen", "pantalla",
+        "alarma", "temporizador", "nota", "notas", "terminal", "tiempo", "clima"
+    }
+
+    pkg_version_match = re.search(
+        r"^(?:cual\s+es\s+la\s+|que\s+)?versi[oó]n\s+(?:de\s+|del\s+)?([a-zA-Z0-9_+.-]+)"
+        r"(?:\s+del\s+sistema|\s+tengo|\s+hay)?$",
+        clean,
+    )
+    if pkg_version_match:
+        pkg = pkg_version_match.group(1).strip()
+        if pkg not in reserved_pkg_words:
+            return "check_package", {"name": pkg, "check": "version"}
+
+    pkg_install_match = re.search(
+        r"^(?:esta|est[aá]|tengo|hay)\s+([a-zA-Z0-9_+.-]+)(?:\s+instalad[oa])?\s+"
+        r"(?:en\s+el\s+sistema|en\s+el\s+pc|en\s+mi\s+equipo)$"
+        r"|^(?:esta|est[aá]|tengo|hay)\s+([a-zA-Z0-9_+.-]+)\s+instalad[oa]$"
+        r"|^(?:esta|est[aá])\s+instalad[oa]\s+([a-zA-Z0-9_+.-]+)(?:\s+en\s+el\s+sistema|\s+en\s+el\s+pc)?$"
+        r"|^which\s+([a-zA-Z0-9_+.-]+)$",
+        clean,
+    )
+    if pkg_install_match:
+        pkg = (
+            pkg_install_match.group(1)
+            or pkg_install_match.group(2)
+            or pkg_install_match.group(3)
+            or pkg_install_match.group(4)
+        ).strip()
+        if pkg not in reserved_pkg_words:
+            return "check_package", {"name": pkg, "check": "installed"}
+
     return None
 
 
@@ -503,6 +537,16 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         question = args.get("question") or args.get("query", "Que hay en pantalla?")
         return "analyze_screen", {"question": question}
 
+    # 22. Verificacion de paquetes y software en el sistema
+    if norm_name in (
+        "checkpackage", "packagecheck", "whichpackage", "packageversion",
+        "versioncheck", "checkversion", "isinstalled", "which", "package", "paquete"
+    ):
+        name = args.get("name") or args.get("package") or args.get("target", "")
+        default_check = "installed" if norm_name in ("which", "isinstalled") else "version"
+        check = args.get("check") or args.get("type") or args.get("action") or default_check
+        return "check_package", {"name": name, "check": check}
+
     return None
 
 
@@ -625,6 +669,12 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         from jota.tools.screen_vision import analyze_screen
         question = args.get("question", "Que hay en pantalla?")
         return analyze_screen(question)
+
+    if tool_name == "check_package":
+        from jota.tools.packages import check_package
+        name = args.get("name") or args.get("package") or args.get("target", "")
+        check = args.get("check") or args.get("action") or "version"
+        return check_package(name=name, check=check)
 
     return False, f"Herramienta no implementada: {tool_name}"
 
