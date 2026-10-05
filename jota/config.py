@@ -213,6 +213,10 @@ Catálogo estricto de herramientas disponibles:
 - check_package(name='...', check='version'|'installed'): Verifica version o presencia en sistema
   (deduce el binario real: 'golang' -> 'go', 'rust' -> 'rustc', 'python' -> 'python3').
 - analyze_screen(question='...'): Analiza la pantalla ("que error sale en la terminal").
+- window_action(action='fullscreen'|'float'|'pin'|'center'): Manipula ventana activa en Hyprland.
+- focus_app(name='...'): Enfoca y salta a la ventana abierta de una app ('telegram', 'firefox').
+- brightness_control(percent=N, action='set'|'up'|'down'|'get'): Controla brillo de pantalla.
+- night_mode_control(action='on'|'off'|'toggle'): Filtro de luz azul / modo noche de pantalla.
 
 REGLAS CRÍTICAS:
 1. SOLO puedes llamar a herramientas del catalogo. No inventes herramientas inexistentes.

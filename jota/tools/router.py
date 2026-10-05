@@ -170,7 +170,17 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     )
     if open_app_match:
         app_target = open_app_match.group(4).strip()
-        return "open_app", {"name": app_target}
+        reserved_app_prefixes = (
+            "brillo",
+            "filtro",
+            "modo noche",
+            "luz nocturna",
+            "esta ventana",
+            "la ventana",
+            "ventana",
+        )
+        if not any(app_target.startswith(p) for p in reserved_app_prefixes):
+            return "open_app", {"name": app_target}
 
     # 5b. Nombre directo de aplicacion o alias conocido
     clean_app_cand = re.sub(r"^(el|la|los|las|un|una)\s+", "", clean).strip()
@@ -311,6 +321,88 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         ).strip()
         if pkg not in reserved_pkg_words:
             return "check_package", {"name": pkg, "check": "installed"}
+
+    # 16. Manipulacion de ventanas (pantalla completa, flotante, pin, centrar)
+    if re.search(
+        r"^(?:pon\s+(?:esta\s+)?ventana\s+en\s+pantalla\s+completa|pantalla\s+completa|"
+        r"maximiza(?:r)?\s+(?:la\s+)?ventana|quita(?:r)?\s+(?:la\s+)?pantalla\s+completa)$",
+        clean,
+    ):
+        return "window_action", {"action": "fullscreen"}
+
+    if re.search(
+        r"^(?:haz\s+flotante\s+(?:esta\s+)?ventana|ventana\s+flotante|"
+        r"devuelve\s+(?:la\s+)?ventana\s+al\s+mosaico|pon\s+(?:la\s+)?ventana\s+en\s+mosaico|"
+        r"modo\s+flotante|alterna(?:r)?\s+flotante)$",
+        clean,
+    ):
+        return "window_action", {"action": "float"}
+
+    if re.search(
+        r"^(?:fija(?:r)?|ancla(?:r)?)\s+(?:esta\s+)?ventana"
+        r"(?:\s+en\s+todos\s+los\s+escritorios)?$",
+        clean,
+    ):
+        return "window_action", {"action": "pin"}
+
+    if re.search(r"^(?:centra(?:r)?\s+(?:esta\s+)?ventana|centrar\s+ventana)$", clean):
+        return "window_action", {"action": "center"}
+
+    # 17. Enfoque directo de ventanas / aplicaciones abiertas
+    reserved_focus_words = {
+        "pantalla", "escritorio", "musica", "música", "volumen", "nota", "notas",
+        "tiempo", "clima", "brillo", "noche", "luz"
+    }
+    focus_match = re.search(
+        r"^(?:pasa|ve|cambia|salta|enfoca|ir)\s+(?:a|al|a\s+la|el|la)?\s*([a-zA-Z0-9_+.-]+)"
+        r"(?:\s+abiert[oa])?$",
+        clean,
+    )
+    if focus_match:
+        target_app = focus_match.group(1).strip()
+        if target_app.lower() not in reserved_focus_words:
+            return "focus_app", {"name": target_app}
+
+    # 18. Control de brillo
+    br_set_match = re.search(
+        r"^(?:pon\s+el\s+brillo(?:\s+de\s+la\s+pantalla)?\s+al|brillo\s+al)\s+(\d+)\s*%?$",
+        clean,
+    )
+    if br_set_match:
+        return "brightness_control", {"percent": int(br_set_match.group(1)), "action": "set"}
+
+    if re.search(r"^(?:sube|aumenta|mas)\s+(?:el\s+)?brillo(?:\s+de\s+la\s+pantalla)?$", clean):
+        return "brightness_control", {"action": "up"}
+
+    if re.search(r"^(?:baja|reduce|menos)\s+(?:el\s+)?brillo(?:\s+de\s+la\s+pantalla)?$", clean):
+        return "brightness_control", {"action": "down"}
+
+    if re.search(
+        r"^(?:que\s+brillo\s+tengo|nivel\s+de\s+brillo|cuanto\s+brillo\s+tengo)$", clean
+    ):
+        return "brightness_control", {"action": "get"}
+
+    # 19. Filtro de luz azul / modo noche
+    if re.search(
+        r"^(?:activa|activar|pon|poner|inicia|iniciar)\s+(?:el\s+)?"
+        r"(?:filtro\s+de\s+luz\s+azul|modo\s+noche|luz\s+nocturna)$",
+        clean,
+    ):
+        return "night_mode_control", {"action": "on"}
+
+    if re.search(
+        r"^(?:desactiva|desactivar|quita|quitar|apaga|apagar|para|parar)\s+(?:el\s+)?"
+        r"(?:filtro\s+de\s+luz\s+azul|modo\s+noche|luz\s+nocturna)$",
+        clean,
+    ):
+        return "night_mode_control", {"action": "off"}
+
+    if re.search(
+        r"^(?:cambia|cambiar|alterna|alternar|toggle)\s+(?:el\s+)?"
+        r"(?:filtro\s+de\s+luz\s+azul|modo\s+noche|luz\s+nocturna)$",
+        clean,
+    ):
+        return "night_mode_control", {"action": "toggle"}
 
     return None
 
@@ -547,6 +639,30 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         check = args.get("check") or args.get("type") or args.get("action") or default_check
         return "check_package", {"name": name, "check": check}
 
+    # 23. Manipulacion de ventanas (fullscreen, float, pin, center)
+    if norm_name in ("windowaction", "window", "manipulatewindow", "ventana"):
+        action = args.get("action") or args.get("mode", "fullscreen")
+        return "window_action", {"action": action}
+
+    # 24. Enfoque de aplicaciones abiertas
+    if norm_name in ("focusapp", "focuswindow", "focus", "enfocar", "saltaraapp"):
+        name = args.get("name") or args.get("app") or args.get("target", "")
+        return "focus_app", {"name": name}
+
+    # 25. Control de brillo de pantalla
+    if norm_name in ("brightnesscontrol", "brightness", "setbrightness", "brillo"):
+        percent = args.get("percent") or args.get("level") or args.get("pct")
+        action = args.get("action", "set" if percent is not None else "get")
+        res_args: dict = {"action": action}
+        if percent is not None:
+            res_args["percent"] = percent
+        return "brightness_control", res_args
+
+    # 26. Modo noche / filtro de luz azul
+    if norm_name in ("nightmodecontrol", "nightmode", "modonoche", "bluelight", "luzazul"):
+        action = args.get("action", "toggle")
+        return "night_mode_control", {"action": action}
+
     return None
 
 
@@ -675,6 +791,27 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         name = args.get("name") or args.get("package") or args.get("target", "")
         check = args.get("check") or args.get("action") or "version"
         return check_package(name=name, check=check)
+
+    if tool_name == "window_action":
+        from jota.tools.workspace import window_action
+        action = args.get("action", "fullscreen")
+        return window_action(action)
+
+    if tool_name == "focus_app":
+        from jota.tools.workspace import focus_app
+        name = args.get("name") or args.get("app", "")
+        return focus_app(name)
+
+    if tool_name == "brightness_control":
+        from jota.tools.display import brightness_control
+        percent = args.get("percent")
+        action = args.get("action", "set" if percent is not None else "get")
+        return brightness_control(percent=percent, action=action)
+
+    if tool_name == "night_mode_control":
+        from jota.tools.display import night_mode_control
+        action = args.get("action", "toggle")
+        return night_mode_control(action=action)
 
     return False, f"Herramienta no implementada: {tool_name}"
 
