@@ -65,5 +65,7 @@ AUTH_RATE_LIMIT_WINDOW_SECONDS: int = 60
 ENABLE_MDNS_DISCOVERY: bool = os.getenv("JOTA_BRIDGE_MDNS", "true").lower() in ("true", "1", "yes")
 
 # Auto-configurar redireccion inversa ADB para conexion por cable USB si hay dispositivo
-ENABLE_AUTO_ADB_REVERSE: bool = os.getenv("JOTA_BRIDGE_AUTO_ADB", "true").lower() in ("true", "1", "yes")
+ENABLE_AUTO_ADB_REVERSE: bool = os.getenv(
+    "JOTA_BRIDGE_AUTO_ADB", "true"
+).lower() in ("true", "1", "yes")
 

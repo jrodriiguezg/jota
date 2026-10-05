@@ -186,7 +186,11 @@ def process_remote_text(
 
         if fast_intent:
             tool_name, tool_args = fast_intent
-            logger.info("Bridge - Intencion rapida detectada en texto (<1ms): %s %s", tool_name, tool_args)
+            logger.info(
+                "Bridge - Intencion rapida detectada en texto (<1ms): %s %s",
+                tool_name,
+                tool_args,
+            )
             result_tuple = execute_tool(tool_name, tool_args)
             tool_result = {
                 "name": tool_name,

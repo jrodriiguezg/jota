@@ -328,7 +328,10 @@ class TestBridgeAPI:
         assert "bluetooth" in status
 
         # Endpoint GET /api/v1/pc/channels
-        resp = client.get("/api/v1/pc/channels", headers={"X-Bridge-Key": "jota-secret-tailscale-key"})
+        resp = client.get(
+            "/api/v1/pc/channels",
+            headers={"X-Bridge-Key": "jota-secret-tailscale-key"},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert "wifi_lan" in data

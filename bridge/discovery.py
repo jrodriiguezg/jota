@@ -105,10 +105,10 @@ def setup_adb_reverse(port: int = 8765) -> tuple[bool, str]:
         )
         lines = [line.strip() for line in res_devices.stdout.splitlines() if line.strip()]
         # Formato habitual: "List of devices attached", luego "<serial>\tdevice"
-        attached = [l for l in lines[1:] if "\tdevice" in l]
+        attached = [dev_line for dev_line in lines[1:] if "\tdevice" in dev_line]
 
         if not attached:
-            return False, "No se detecto ningun dispositivo Android conectado por cable USB con depuracion activa."
+            return False, "No se detecto dispositivo Android conectado por USB con depuracion."
 
         device_serial = attached[0].split("\t")[0]
         # Configurar adb reverse
@@ -159,7 +159,10 @@ def get_nearby_channels_status(port: int = 8765) -> dict[str, Any]:
                     channels["bluetooth"]["pan_active"] = True
                     channels["bluetooth"]["interface"] = iface
                 # Detectar USB Tethering (usb0, rndis0, o enp*u* interfaz ethernet usb)
-                elif iface.startswith("usb") or iface.startswith("rndis") or "u" in iface and iface.startswith("enp"):
+                elif (
+                    iface.startswith(("usb", "rndis"))
+                    or ("u" in iface and iface.startswith("enp"))
+                ):
                     # Verificar si la interfaz tiene carrier/estado UP
                     operstate_file = os.path.join(net_path, iface, "operstate")
                     if os.path.exists(operstate_file):
@@ -180,11 +183,17 @@ def get_nearby_channels_status(port: int = 8765) -> dict[str, Any]:
     if adb_bin:
         channels["usb_cable"]["adb_available"] = True
         try:
-            res = subprocess.run([adb_bin, "devices"], capture_output=True, text=True, timeout=2, check=False)
-            lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
-            for l in lines[1:]:
-                if "\t" in l:
-                    serial, dev_state = l.split("\t", 1)
+            res = subprocess.run(
+                [adb_bin, "devices"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+            for dev_line in lines[1:]:
+                if "\t" in dev_line:
+                    serial, dev_state = dev_line.split("\t", 1)
                     channels["usb_cable"]["devices"].append({"serial": serial, "state": dev_state})
         except Exception:
             pass

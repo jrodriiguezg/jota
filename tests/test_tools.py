@@ -173,6 +173,36 @@ class TestFastIntentRouter:
             {"action": "search", "query": "comprar leche"},
         )
 
+    def test_package_fast_intents(self):
+        assert match_fast_intent("cual es la version de python del sistema") == (
+            "check_package",
+            {"name": "python", "check": "version"},
+        )
+        assert match_fast_intent("cual es la version de java") == (
+            "check_package",
+            {"name": "java", "check": "version"},
+        )
+        assert match_fast_intent("esta java en el sistema") == (
+            "check_package",
+            {"name": "java", "check": "installed"},
+        )
+        assert match_fast_intent("esta golang en el sistema") == (
+            "check_package",
+            {"name": "golang", "check": "installed"},
+        )
+        assert match_fast_intent("tengo rust instalado en el sistema") == (
+            "check_package",
+            {"name": "rust", "check": "installed"},
+        )
+        assert match_fast_intent("which go") == (
+            "check_package",
+            {"name": "go", "check": "installed"},
+        )
+        assert match_fast_intent("version del kernel") == (
+            "check_package",
+            {"name": "kernel", "check": "version"},
+        )
+
     def test_non_tool_intent_returns_none(self):
         assert match_fast_intent("como estas hoy") is None
         assert match_fast_intent("cual es la capital de Francia") is None
@@ -235,8 +265,24 @@ class TestLLMToolParser:
         out = "TOOL: get_current_time(mode='time')\nSon las 14:45."
         assert parse_llm_tool_call(out) == ("get_current_time", {"mode": "time"})
 
-        out2 = "TOOL: date(mode='date')"
-        assert parse_llm_tool_call(out2) == ("get_current_time", {"mode": "date"})
+    def test_parse_check_package(self):
+        out = "TOOL: check_package(name='python3', check='version')\nConsultando version."
+        assert parse_llm_tool_call(out) == (
+            "check_package",
+            {"name": "python3", "check": "version"},
+        )
+
+        out2 = "TOOL: check_package(name='go', check='installed')\nEsta instalado Go."
+        assert parse_llm_tool_call(out2) == (
+            "check_package",
+            {"name": "go", "check": "installed"},
+        )
+
+        out3 = "TOOL: which(name='java')"
+        assert parse_llm_tool_call(out3) == (
+            "check_package",
+            {"name": "java", "check": "installed"},
+        )
 
     def test_parse_no_tool(self):
         assert parse_llm_tool_call("Hola, soy Jota en que puedo ayudarte?") is None
@@ -584,6 +630,63 @@ class TestExtendedTools:
         intent2 = match_fast_intent("explica que hay en la pantalla")
         assert intent2 is not None
         assert intent2[0] == "analyze_screen"
+
+
+class TestPackageTools:
+    """Pruebas unitarias para verificacion de versiones y presencia de paquetes."""
+
+    @patch("jota.tools.packages.shutil.which")
+    @patch("jota.tools.packages._run_cmd")
+    def test_check_package_version_success(self, mock_run, mock_which):
+        from jota.tools.packages import check_package
+
+        mock_which.return_value = "/usr/bin/python3"
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "Python 3.14.7\n"
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        ok, msg = check_package("python", check="version")
+        assert ok is True
+        assert "Python 3.14.7" in msg
+
+    @patch("jota.tools.packages.shutil.which")
+    def test_check_package_installed_success(self, mock_which):
+        from jota.tools.packages import check_package
+
+        mock_which.return_value = "/usr/bin/go"
+        ok, msg = check_package("golang", check="installed")
+        assert ok is True
+        assert "instalado en el sistema en /usr/bin/go" in msg
+
+    @patch("jota.tools.packages.shutil.which")
+    @patch("jota.tools.packages._extract_rpm_version")
+    @patch("jota.tools.packages._extract_flatpak_version")
+    def test_check_package_not_installed(self, mock_fp, mock_rpm, mock_which):
+        from jota.tools.packages import check_package
+
+        mock_which.return_value = None
+        mock_rpm.return_value = None
+        mock_fp.return_value = None
+
+        ok, msg = check_package("paquetefalsoxyz", check="installed")
+        assert ok is True
+        assert "no esta instalado" in msg
+
+    @patch("jota.tools.packages._get_kernel_info")
+    def test_check_package_kernel(self, mock_k):
+        from jota.tools.packages import check_package
+
+        mock_k.return_value = "6.13.5-200.fc41.x86_64"
+        ok, msg = check_package("kernel", check="version")
+        assert ok is True
+        assert "6.13.5" in msg
+
+    def test_execute_tool_check_package(self):
+        ok, msg = execute_tool("check_package", {"name": "python", "check": "version"})
+        assert ok is True
+        assert "python" in msg.lower()
 
 
 

@@ -527,6 +527,13 @@ def execute_pc_action(action: str) -> tuple[bool, str]:
         except Exception as e:
             return False, f"Error al abrir URL: {e}"
 
+    if clean_act.startswith("check_package:") or clean_act.startswith("pkg:"):
+        parts = action.split(":")
+        pkg_name = parts[1].strip() if len(parts) > 1 else ""
+        check_type = parts[2].strip() if len(parts) > 2 else "version"
+        from jota.tools.packages import check_package
+        return check_package(pkg_name, check=check_type)
+
     return False, f"Accion no reconocida: {action}"
 
 

@@ -56,9 +56,11 @@ def _resolve_llm_model() -> Path:
 
 
 LLM_MODEL = _resolve_llm_model()
-LLM_N_CTX = int(os.getenv("JOTA_LLM_CTX", "2048"))          # contexto optimizado para asistente de voz y catalogo
+# Contexto optimizado para asistente de voz y catalogo
+LLM_N_CTX = int(os.getenv("JOTA_LLM_CTX", "2048"))
 LLM_N_GPU_LAYERS = int(os.getenv("JOTA_LLM_GPU_LAYERS", "0"))
-LLM_THREADS = int(os.getenv("JOTA_LLM_THREADS", "4"))       # limitar hilos para evitar saturar la CPU al 99%
+# Limitar hilos para evitar saturar la CPU al 99%
+LLM_THREADS = int(os.getenv("JOTA_LLM_THREADS", "4"))
 
 # Backend LLM nativo autonomo (100% local via llama-cpp-python, sin Ollama)
 LLM_BACKEND = "llama_cpp"
@@ -191,7 +193,7 @@ Catálogo estricto de herramientas disponibles:
 - screenshot(): Captura y muestra la pantalla del PC ("muestrame la pantalla del pc").
 - switch_workspace(target=N): Cambia de escritorio ("pasa al escritorio 3").
 - move_to_workspace(target=N): Mueve la ventana activa ("mueve la ventana al 3").
-- open_app(name='...'): Abre aplicacion (ej: 'musica' o 'feishin' ante reproductor de musica, 'dolphin' ante explorador de archivos, 'firefox', 'terminal').
+- open_app(name='...'): Abre aplicacion (ej: 'musica'/'feishin', 'dolphin', 'firefox', 'terminal').
 - volume_control(action='up'|'down'|'mute'): Sube, baja o silencia el audio.
 - media_control(action='play'|'pause'|'next'|'previous'): Control multimedia.
 - web_search(query='...'): Busca en la web.
@@ -204,11 +206,13 @@ Catálogo estricto de herramientas disponibles:
 - get_now_playing(): Consulta la cancion que esta sonando ("que cancion esta sonando").
 - send_notification(title='...', message='...'): Notificacion de escritorio.
 - get_weather(city='...'): Clima de una ciudad (ej: 'Albacete').
-- manage_notes(action='add'|'list'|'clear'|'search', text='...', query='...'): Gestiona o busca notas.
+- manage_notes(action='add'|'list'|'clear'|'search', text='...', query='...'): Gestiona notas.
 - set_timer(seconds=N, label='...'): Inicia un temporizador.
 - cancel_timer(): Cancela temporizadores activos.
 - get_current_time(mode='time'|'date'|'full'): Consulta hora o fecha del sistema.
-- analyze_screen(question='...'): Analiza visualmente la pantalla con el modelo de vision ("que error sale en la terminal", "explicame que tengo en pantalla").
+- check_package(name='...', check='version'|'installed'): Verifica version o presencia en sistema
+  (deduce el binario real: 'golang' -> 'go', 'rust' -> 'rustc', 'python' -> 'python3').
+- analyze_screen(question='...'): Analiza la pantalla ("que error sale en la terminal").
 
 REGLAS CRÍTICAS:
 1. SOLO puedes llamar a herramientas del catalogo. No inventes herramientas inexistentes.
@@ -218,12 +222,34 @@ REGLAS CRÍTICAS:
 5. Si el usuario pide la bateria del PC, usa TOOL: get_pc_battery().
 6. Si el usuario pide ver la pantalla del PC, usa TOOL: screenshot().
 7. Si el usuario pide pasar de escritorio, usa TOOL: switch_workspace(target=N).
-8. Si el usuario quiere ejecutar una accion, responde EXACTAMENTE en este formato:
+8. Si el usuario consulta la version o si un paquete esta en el sistema, usa TOOL: check_package.
+   Deduce el nombre real del binario ('golang' -> 'go', 'rust' -> 'rustc', 'python' -> 'python3').
+9. Si el usuario quiere ejecutar una accion, responde EXACTAMENTE en este formato:
 TOOL: <nombre>(<parametros>)
 <mensaje breve para decir en voz alta>
-9. Si el usuario hace una pregunta general conversacional, responde breve y sin TOOL.
+10. Si el usuario hace una pregunta general conversacional, responde breve y sin TOOL.
 
 Ejemplos:
+Usuario: cual es la version de python del sistema
+TOOL: check_package(name='python3', check='version')
+Consultando la version de Python.
+
+Usuario: cual es la version de java
+TOOL: check_package(name='java', check='version')
+Consultando la version de Java.
+
+Usuario: esta java en el sistema
+TOOL: check_package(name='java', check='installed')
+Comprobando si Java esta instalado.
+
+Usuario: esta golang en el sistema
+TOOL: check_package(name='go', check='installed')
+Comprobando si Golang esta instalado.
+
+Usuario: cual es la version de golang
+TOOL: check_package(name='go', check='version')
+Consultando la version de Go.
+
 Usuario: abre el reproductor de musica
 TOOL: open_app(name='musica')
 Abriendo el reproductor de musica.
