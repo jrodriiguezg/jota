@@ -28,6 +28,9 @@ def normalize_speech_command(text: str) -> str:
     clean = re.sub(r"^(por favor\s+|puedes\s+)?(habla|hablar|habre)\s+", r"\1abre ", clean)
     clean = re.sub(r"^(por favor\s+|puedes\s+)?(a\s+ver\s+(a\s+)?|haber\s+)", r"\1abre ", clean)
 
+    # Confusiones de verbos de cierre (fonetica de Whisper)
+    clean = re.sub(r"\b(fiera|fierra|sierra|cierre|cerra)\b", "cierra", clean)
+
     # Confusiones de verbos de volumen (fonetica de Whisper)
     clean = re.sub(r"\b(suelva|suelvo|suelba|suelbo|suelve)\b", "sube", clean)
     clean = re.sub(r"\b(bajame|bajale|bajalo)\b", "baja", clean)
@@ -348,6 +351,30 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     if re.search(r"^(?:centra(?:r)?\s+(?:esta\s+)?ventana|centrar\s+ventana)$", clean):
         return "window_action", {"action": "center"}
 
+    # 16b. Cierre de ventanas o aplicaciones especificas
+    if re.search(
+        r"^(?:cierra|cerrar|quitar|quita)\s+(?:esta\s+|la\s+)?ventana(?:\s+activa)?$",
+        clean,
+    ):
+        return "close_window", {"app": ""}
+
+    close_app_match = re.search(
+        r"^(?:cierra|cerrar|quitar|quita)\s+"
+        r"(?:(?:la\s+)?(?:ventana|aplicaci[oó]n|app)\s+(?:de\s+)?)?"
+        r"(?:el\s+|la\s+|los\s+|las\s+)?"
+        r"(.+)$",
+        clean,
+    )
+    if close_app_match:
+        target_raw = close_app_match.group(1).strip()
+        reserved_close = {
+            "ventana", "esta ventana", "la ventana", "esta", "activa",
+            "sesion", "sesión", "el pc", "pc", "equipo", "ordenador",
+            "temporizador", "alarma",
+        }
+        if target_raw not in reserved_close and not target_raw.startswith("sesion"):
+            return "close_window", {"app": target_raw}
+
     # 17. Enfoque directo de ventanas / aplicaciones abiertas
     reserved_focus_words = {
         "pantalla", "escritorio", "musica", "música", "volumen", "nota", "notas",
@@ -519,15 +546,25 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         confirmed = args.get("confirmed", False)
         return "system_power", {"action": action, "confirmed": confirmed}
 
-    # 10. Gestion de ventanas
+    # 10. Gestion y cierre de ventanas
     if norm_name in (
         "closewindow",
         "closeactivewindow",
         "killwindow",
         "cerrarventana",
         "cerrarventanactiva",
+        "close",
     ):
-        return "close_active_window", {}
+        app = (
+            args.get("app")
+            or args.get("name")
+            or args.get("app_name")
+            or args.get("target", "")
+        )
+        if norm_name in ("closeactivewindow", "cerrarventanactiva") and not app:
+            return "close_active_window", {}
+        return "close_window", {"app": app}
+
 
     # 11. Notificaciones de escritorio
     if norm_name in (
@@ -719,9 +756,12 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         confirmed = bool(args.get("confirmed", False))
         return system_power(action, confirmed=confirmed)
 
-    if tool_name == "close_active_window":
-        from jota.tools.system import close_active_window
-        return close_active_window()
+    if tool_name in ("close_window", "close_active_window"):
+        from jota.tools.workspace import close_window
+
+        app = args.get("app") or args.get("name") or args.get("app_name", "")
+        return close_window(app_name=app)
+
 
     if tool_name == "send_notification":
         from jota.tools.system import send_desktop_notification

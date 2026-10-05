@@ -119,6 +119,14 @@ class TestFastIntentRouter:
         )
         assert match_fast_intent("suelba el volumen") == ("volume_control", {"direction": "up"})
         assert match_fast_intent("bajame el volumen") == ("volume_control", {"direction": "down"})
+        # Confusiones de cierre ("fiera/fierra/sierra" por "cierra")
+        assert match_fast_intent("Fiera la ventana de Firefox.") == (
+            "close_window",
+            {"app": "firefox"},
+        )
+        assert match_fast_intent("sierra dolphin") == ("close_window", {"app": "dolphin"})
+        assert match_fast_intent("fierra terminal") == ("close_window", {"app": "terminal"})
+
 
     def test_datetime_intents(self):
         assert match_fast_intent("que hora es") == ("get_current_time", {"mode": "time"})
@@ -260,6 +268,33 @@ class TestFastIntentRouter:
             {"action": "toggle"},
         )
 
+        # Cierre de ventanas y apps
+        assert match_fast_intent("cierra esta ventana") == (
+            "close_window",
+            {"app": ""},
+        )
+        assert match_fast_intent("cierra la ventana") == (
+            "close_window",
+            {"app": ""},
+        )
+        assert match_fast_intent("cierra la ventana activa") == (
+            "close_window",
+            {"app": ""},
+        )
+        assert match_fast_intent("cierra firefox") == (
+            "close_window",
+            {"app": "firefox"},
+        )
+        assert match_fast_intent("cierra la ventana de firefox") == (
+            "close_window",
+            {"app": "firefox"},
+        )
+        assert match_fast_intent("cierra el explorador de archivos") == (
+            "close_window",
+            {"app": "explorador de archivos"},
+        )
+
+
     def test_non_tool_intent_returns_none(self):
         assert match_fast_intent("como estas hoy") is None
         assert match_fast_intent("cual es la capital de Francia") is None
@@ -356,6 +391,13 @@ class TestLLMToolParser:
 
         out4 = "TOOL: night_mode_control(action='on')"
         assert parse_llm_tool_call(out4) == ("night_mode_control", {"action": "on"})
+
+        out5 = "TOOL: close_window(app='firefox')\nCerrando Firefox."
+        assert parse_llm_tool_call(out5) == ("close_window", {"app": "firefox"})
+
+        out6 = "TOOL: close_window()\nCerrando ventana."
+        assert parse_llm_tool_call(out6) == ("close_window", {"app": ""})
+
 
     def test_parse_no_tool(self):
         assert parse_llm_tool_call("Hola, soy Jota en que puedo ayudarte?") is None
@@ -894,6 +936,79 @@ class TestWindowAndDisplayTools:
             ok, msg = execute_tool("brightness_control", {"percent": 40, "action": "set"})
             assert ok is True
             assert "40%" in msg
+
+    @patch("jota.tools.workspace.subprocess.run")
+    @patch("jota.tools.workspace.shutil.which")
+    def test_close_window_active_success(self, mock_which, mock_run):
+        from jota.tools.workspace import close_window
+
+        mock_which.return_value = "/usr/bin/hyprctl"
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        ok, msg = close_window("")
+        assert ok is True
+        assert "cerrada" in msg.lower()
+        mock_run.assert_called_with(
+            ["/usr/bin/hyprctl", "dispatch", "hl.dsp.window.close()"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+
+    @patch("jota.tools.workspace.subprocess.run")
+    @patch("jota.tools.workspace.shutil.which")
+    def test_close_window_named_app_success(self, mock_which, mock_run):
+        import json
+
+        from jota.tools.workspace import close_window
+
+        mock_which.return_value = "/usr/bin/hyprctl"
+        clients_proc = MagicMock()
+        clients_proc.returncode = 0
+        clients_proc.stdout = json.dumps(
+            [{"class": "firefox", "title": "Mozilla Firefox", "address": "0x55a123"}]
+        )
+
+        close_proc = MagicMock()
+        close_proc.returncode = 0
+        close_proc.stderr = ""
+
+        mock_run.side_effect = [clients_proc, close_proc]
+
+        ok, msg = close_window("firefox")
+        assert ok is True
+        assert "cerrada" in msg.lower()
+        assert "firefox" in msg.lower()
+
+    @patch("jota.tools.workspace.subprocess.run")
+    @patch("jota.tools.workspace.shutil.which")
+    def test_close_window_named_app_not_found(self, mock_which, mock_run):
+        import json
+
+        from jota.tools.workspace import close_window
+
+        mock_which.return_value = "/usr/bin/hyprctl"
+        clients_proc = MagicMock()
+        clients_proc.returncode = 0
+        clients_proc.stdout = json.dumps([])
+        mock_run.return_value = clients_proc
+
+        ok, msg = close_window("firefox")
+        assert ok is False
+        assert "no hay ninguna ventana abierta" in msg.lower()
+
+    def test_execute_tool_close_window(self):
+        with patch("jota.tools.workspace.close_window") as mock_cw:
+            mock_cw.return_value = (True, "Ventana de firefox cerrada.")
+            ok, msg = execute_tool("close_window", {"app": "firefox"})
+            assert ok is True
+            assert "firefox cerrada" in msg
+            mock_cw.assert_called_with(app_name="firefox")
+
 
 
 
