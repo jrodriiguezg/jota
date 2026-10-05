@@ -299,6 +299,7 @@ class TestBridgeAPI:
 
     def test_cleanup_old_temp_files(self, tmp_path, monkeypatch):
         import time
+
         from bridge.voice_pipeline import cleanup_old_temp_files
 
         monkeypatch.setattr("bridge.voice_pipeline.BRIDGE_TEMP_DIR", tmp_path)
@@ -367,6 +368,7 @@ class TestBridgeAPI:
 
     def test_mdns_registration_lifecycle(self):
         import asyncio
+
         from bridge.discovery import register_mdns_service, unregister_mdns_service
 
         async def _run():

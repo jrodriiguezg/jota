@@ -28,6 +28,11 @@ def normalize_speech_command(text: str) -> str:
     clean = re.sub(r"^(por favor\s+|puedes\s+)?(habla|hablar|habre)\s+", r"\1abre ", clean)
     clean = re.sub(r"^(por favor\s+|puedes\s+)?(a\s+ver\s+(a\s+)?|haber\s+)", r"\1abre ", clean)
 
+    # Confusiones de verbos de volumen (fonetica de Whisper)
+    clean = re.sub(r"\b(suelva|suelvo|suelba|suelbo|suelve)\b", "sube", clean)
+    clean = re.sub(r"\b(bajame|bajale|bajalo)\b", "baja", clean)
+    clean = re.sub(r"\b(subeme|subele|subelo)\b", "sube", clean)
+
     # Confusiones de nombres comunes de apps
     clean = re.sub(r"\b(terminar|terminado)\b", "terminal", clean)
     clean = re.sub(r"\bfeisfin\b", "feishin", clean)
@@ -63,6 +68,18 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         return "analyze_screen", {"question": text}
 
     # 2. Control de volumen
+    # 2a. Nivel especifico de volumen (ej: 'suelvo el volumen a 100', 'sube el volumen al 50%')
+    vol_set = re.search(
+        r"^(?:sube|subir|baja|bajar|pon|poner|coloca|colocar|ajusta|ajustar|establece|deja)?\s*"
+        r"(?:el\s+)?(?:volumen|sonido|audio)\s+(?:al?|en)\s+(\d{1,3})\s*(?:%|por\s*ciento)?$"
+        r"|^(?:sube|subir|baja|bajar|pon|poner|coloca|ajusta)\s+(?:el\s+)?(?:volumen|sonido|audio)\s+(\d{1,3})\s*(?:%|por\s*ciento)?$"
+        r"|^(?:volumen|sonido|audio)\s+(?:al?|en)?\s*(\d{1,3})\s*(?:%|por\s*ciento)?$",
+        clean,
+    )
+    if vol_set:
+        val = vol_set.group(1) or vol_set.group(2) or vol_set.group(3)
+        return "volume_control", {"action": "set", "level": int(val)}
+
     if re.search(
         r"^(sube|subir|aumenta|aumentar|mas|subeme)\s+(el\s+)?(volumen|sonido|audio)",
         clean,
@@ -83,6 +100,7 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         return "volume_control", {"action": "mute"}
 
     # 3. Control de reproduccion
+    # 3a. Pausa
     if re.search(
         r"^(pausa|pausar|para|parar|deten|detener|corta|cortar)"
         r"(\s+(la\s+|el\s+)?(m[uú]sica|canci[oó]n|reproducci[oó]n|audio|pista|tema))?$",
@@ -90,6 +108,30 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     ):
         return "media_control", {"action": "pause"}
 
+    # 3b. Siguiente cancion / pista
+    # (se evalua antes de play para comandos como 'reproduce la siguiente cancion')
+    if re.search(
+        r"^(reproduce\s+(la\s+)?|pon\s+(la\s+)?|pasa\s+(a\s+la\s+)?|salta\s+(a\s+la\s+)?)?"
+        r"(siguiente|otra)\s+(canci[oó]n|pista|m[uú]sica|tema)"
+        r"|^(cambia|pasa|salta)\s+(de\s+)?(canci[oó]n|pista|tema)"
+        r"|^(pon\s+la\s+|pasa\s+a\s+la\s+)?siguiente(\s+canci[oó]n|\s+pista|\s+tema)?$"
+        r"|^siguiente$",
+        clean,
+    ):
+        return "media_control", {"action": "next"}
+
+    # 3c. Cancion anterior / pista anterior
+    if re.search(
+        r"^(reproduce\s+(la\s+)?|pon\s+(la\s+)?|vuelve\s+a\s+la\s+|pasa\s+a\s+la\s+)?"
+        r"(anterior|previa)\s+(canci[oó]n|pista|m[uú]sica|tema)"
+        r"|^(canci[oó]n|pista|tema)\s+(anterior|previa)"
+        r"|^(vuelve\s+a\s+la\s+|pon\s+la\s+)?anterior(\s+canci[oó]n|\s+pista|\s+tema)?$"
+        r"|^anterior$",
+        clean,
+    ):
+        return "media_control", {"action": "previous"}
+
+    # 3d. Iniciar reproduccion / reanudar
     if re.search(
         r"^(reproduce|reproducir|reanuda|reanudar|continua|continuar|dale\s+al\s+play|play)"
         r"(\s+(la\s+|el\s+)?(reproducci[oó]n(\s+de(\s+la)?\s+(m[uú]sica|canci[oó]n|audio))?|m[uú]sica|canci[oó]n|tema|pista|audio))?$"
@@ -101,21 +143,6 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         clean,
     ):
         return "media_control", {"action": "play"}
-
-
-
-    if re.search(
-        r"^(siguiente|cambia(\s+de)?|pasa(\s+de)?|otra|pon\s+la\s+siguiente)"
-        r"\s+(cancion|pista|musica|tema)?$|^siguiente$",
-        clean,
-    ):
-        return "media_control", {"action": "next"}
-
-    if re.search(
-        r"^(cancion|pista|tema)?\s*anterior$|^vuelve\s+a\s+la\s+cancion\s+anterior$",
-        clean,
-    ):
-        return "media_control", {"action": "previous"}
 
     # 4. Busqueda web
     search_prefix = re.search(
@@ -145,7 +172,7 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         app_target = open_app_match.group(4).strip()
         return "open_app", {"name": app_target}
 
-    # 5b. Nombre directo de aplicacion o alias conocido (ej: 'reproductor de musica', 'feishin', 'terminal')
+    # 5b. Nombre directo de aplicacion o alias conocido
     clean_app_cand = re.sub(r"^(el|la|los|las|un|una)\s+", "", clean).strip()
     from jota.config import APP_ALIASES, CUSTOM_APP_MAPPINGS
     if clean_app_cand in APP_ALIASES or clean_app_cand in CUSTOM_APP_MAPPINGS:
@@ -193,7 +220,10 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     )
     if ws_move:
         raw_app = (ws_move.group(6) or "").strip()
-        if raw_app in ("ventana", "aplicacion", "aplicación", "app", "la ventana", "la app", "el", "la"):
+        generic_tokens = (
+            "ventana", "aplicacion", "aplicación", "app", "la ventana", "la app", "el", "la"
+        )
+        if raw_app in generic_tokens:
             raw_app = ""
         val = ws_move.group(7)
         res_dict = {"target": int(val)}
@@ -297,6 +327,9 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
     if norm_name in ("volumecontrol", "setvolume", "audiocontrol", "soundcontrol"):
         action = args.get("action", "")
         direction = args.get("direction", "")
+        level = args.get("level") or args.get("value")
+        if level is not None:
+            return "volume_control", {"action": "set", "level": int(level)}
         if action == "mute":
             return "volume_control", {"action": "mute"}
         if action in ("up", "down"):
@@ -464,7 +497,9 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         return "cancel_timer", {}
 
     # 21. Vision y analisis de pantalla
-    if norm_name in ("analyzescreen", "screenvision", "vision", "explainscreen", "analizarpantalla"):
+    if norm_name in (
+        "analyzescreen", "screenvision", "vision", "explainscreen", "analizarpantalla"
+    ):
         question = args.get("question") or args.get("query", "Que hay en pantalla?")
         return "analyze_screen", {"question": question}
 
@@ -484,6 +519,10 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
     if tool_name == "volume_control":
         if args.get("action") == "mute":
             return toggle_mute()
+        if args.get("action") == "set" or "level" in args:
+            from jota.tools.media import set_volume_level
+            level = int(args.get("level", 50))
+            return set_volume_level(level)
         direction = args.get("direction", "up")
         return set_volume(direction)
 

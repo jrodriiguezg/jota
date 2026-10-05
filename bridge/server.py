@@ -6,9 +6,9 @@ con dispositivos Android.
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-import time
 from typing import Any
 
 import uvicorn
@@ -120,9 +120,26 @@ async def lifespan(app: FastAPI):
 
     clip_task = asyncio.create_task(monitor_clipboard())
 
+    # 4. Listener de la tecla Copilot para push-to-talk en el PC
+    copilot_service = None
+    try:
+        from jota.service import CopilotVoiceService
+
+        copilot_service = CopilotVoiceService()
+        copilot_service.start()
+        logger.info("Copilot Push-to-Talk activo en PC: pulsa Copilot para hablar.")
+    except Exception as e:
+        logger.info("Listener de tecla Copilot local no iniciado en Bridge: %s", e)
+
     yield
 
     # Limpieza al apagar
+    if copilot_service:
+        try:
+            copilot_service.stop()
+        except Exception:
+            pass
+
     if clip_task:
         clip_task.cancel()
 
@@ -250,7 +267,9 @@ def pc_status():
 
 @app.get("/api/v1/pc/channels", dependencies=[Depends(verify_auth)])
 def pc_channels():
-    """Retorna estado de los canales de conexion cercanos (WiFi/LAN, Cable USB ADB, Bluetooth PAN)."""
+    """
+    Retorna estado de los canales de conexion cercanos (WiFi/LAN, Cable USB ADB, Bluetooth PAN).
+    """
     from bridge.discovery import get_nearby_channels_status
 
     return get_nearby_channels_status(port=BRIDGE_PORT)

@@ -86,6 +86,42 @@ def set_volume(direction: str, step: int = VOLUME_STEP_PERCENT) -> tuple[bool, s
     return False, err_msg
 
 
+def set_volume_level(level: int) -> tuple[bool, str]:
+    """
+    Ajusta el volumen del sistema a un porcentaje especifico (0-150).
+    """
+    clamped = max(0, min(150, int(level)))
+
+    # Intentar con wpctl (PipeWire / WirePlumber por defecto en Fedora)
+    if shutil.which("wpctl"):
+        res = _run_cmd([
+            "wpctl",
+            "set-volume",
+            "-l",
+            "1.5",
+            "@DEFAULT_AUDIO_SINK@",
+            f"{clamped}%",
+        ])
+        if res.returncode == 0:
+            vol = get_current_volume()
+            target_vol = vol if vol is not None else clamped
+            msg = f"Volumen fijado al {target_vol}%."
+            logger.info("Control de volumen: %s", msg)
+            return True, msg
+
+    # Fallback con pactl
+    if shutil.which("pactl"):
+        res = _run_cmd(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{clamped}%"])
+        if res.returncode == 0:
+            msg = f"Volumen fijado al {clamped}%."
+            logger.info("Control de volumen via pactl: %s", msg)
+            return True, msg
+
+    err_msg = "No se encontro ningun controlador de volumen compatible (wpctl/pactl)."
+    logger.error(err_msg)
+    return False, err_msg
+
+
 def toggle_mute() -> tuple[bool, str]:
     """Alterna el silencio de audio del sistema."""
     if shutil.which("wpctl"):
@@ -132,7 +168,8 @@ def playback_control(action: str) -> tuple[bool, str]:
         logger.info("Reproduccion multimedia: %s", ok_message)
         return True, ok_message
 
-    # Si playerctl falla en reproducir porque no hay reproductor abierto, intentar abrir el predeterminado
+    # Si playerctl falla en reproducir porque no hay reproductor abierto,
+    # intentar abrir el predeterminado
     if action in ("play", "play_pause", "toggle"):
         try:
             from jota.tools.apps import launch_application

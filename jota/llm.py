@@ -12,7 +12,6 @@ except ImportError:
     Llama = None
 
 from jota.config import (
-    LLM_BACKEND,
     LLM_ENABLE_THINKING,
     LLM_MODEL,
     LLM_N_CTX,

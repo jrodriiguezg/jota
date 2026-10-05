@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
-from typing import Tuple
 
 from jota.llm import clean_text_for_tts
 
@@ -48,7 +47,7 @@ def query_vision_model(
     endpoint: str = DEFAULT_VISION_URL,
     model: str = DEFAULT_VISION_MODEL,
     timeout: int = 15,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """
     Envia la imagen codificada en Base64 junto con la pregunta al modelo de vision (Ollama).
     Retorna (exito, texto_limpio).
@@ -97,7 +96,7 @@ def query_vision_model(
     return False, "No se pudo obtener respuesta del modelo de vision."
 
 
-def analyze_screen(question: str = "Que hay en pantalla?") -> Tuple[bool, str]:
+def analyze_screen(question: str = "Que hay en pantalla?") -> tuple[bool, str]:
     """
     Toma una captura de pantalla y la analiza con el modelo de vision local.
     Devuelve (exito, mensaje_para_tts).
