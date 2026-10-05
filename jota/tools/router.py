@@ -181,9 +181,12 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
             "esta ventana",
             "la ventana",
             "ventana",
+            "contenedor",
+            "puerto",
         )
         if not any(app_target.startswith(p) for p in reserved_app_prefixes):
             return "open_app", {"name": app_target}
+
 
     # 5b. Nombre directo de aplicacion o alias conocido
     clean_app_cand = re.sub(r"^(el|la|los|las|un|una)\s+", "", clean).strip()
@@ -431,7 +434,93 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     ):
         return "night_mode_control", {"action": "toggle"}
 
+    # 20. Inspeccion y liberacion de puertos
+    m_port_kill = re.search(
+        r"^(?:libera|liberar|mata|matar|cierra|cerrar)\s+"
+        r"(?:lo\s+que\s+est[eé]\s+en\s+)?(?:el\s+)?puerto\s+(\d+)$",
+        clean,
+    )
+    if m_port_kill:
+        return "port_action", {"port": int(m_port_kill.group(1)), "action": "kill"}
+
+    m_port_check = re.search(
+        r"^(?:que\s+proceso\s+(?:esta\s+)?usa(?:ndo)?|quien\s+(?:esta\s+)?usa(?:ndo)?|"
+        r"que\s+hay\s+en)\s+(?:el\s+)?puerto\s+(\d+)$"
+        r"|^puerto\s+(\d+)$",
+        clean,
+    )
+    if m_port_check:
+        p = m_port_check.group(1) or m_port_check.group(2)
+        return "port_action", {"port": int(p), "action": "check"}
+
+    # 21. Gestion de contenedores (Docker / Podman)
+    if re.search(
+        r"^(?:que\s+contenedores\s+(?:estan\s+corriendo|hay)|"
+        r"contenedores\s+(?:activos|en\s+ejecuci[oó]n)|"
+        r"lista\s+de\s+contenedores|estado\s+de\s+(?:los\s+)?contenedores)$",
+        clean,
+    ):
+        return "container_action", {"action": "list"}
+
+    m_cont_stop = re.search(
+        r"^(?:para|parar|deten|detener)\s+el\s+contenedor(?:\s+de)?\s+([a-zA-Z0-9_.-]+)$",
+        clean,
+    )
+    if m_cont_stop:
+        return "container_action", {"action": "stop", "target": m_cont_stop.group(1)}
+
+    m_cont_restart = re.search(
+        r"^(?:reinicia|reiniciar)\s+el\s+contenedor(?:\s+de)?\s+([a-zA-Z0-9_.-]+)$",
+        clean,
+    )
+    if m_cont_restart:
+        return "container_action", {"action": "restart", "target": m_cont_restart.group(1)}
+
+    m_cont_start = re.search(
+        r"^(?:inicia|iniciar|arranca|arrancar)\s+el\s+contenedor(?:\s+de)?\s+([a-zA-Z0-9_.-]+)$",
+        clean,
+    )
+    if m_cont_start:
+        return "container_action", {"action": "start", "target": m_cont_start.group(1)}
+
+    # 22. Monitor de consumo (RAM / CPU) y matar procesos
+    if re.search(
+        r"^(?:que\s+proceso\s+(?:(?:esta\s+)?(?:consumiendo|consume)|usa|gasta)\s+m[aá]s\s+"
+        r"(?:ram|memoria)|procesos\s+con\s+m[aá]s\s+(?:ram|memoria)|uso\s+de\s+memoria|"
+        r"que\s+consume\s+m[aá]s\s+(?:ram|memoria))$",
+        clean,
+    ):
+        return "process_monitor", {"action": "top_ram"}
+
+    if re.search(
+        r"^(?:que\s+proceso\s+(?:(?:esta\s+)?(?:consumiendo|consume)|se\s+esta\s+comiendo|"
+        r"usa|gasta)\s+(?:la\s+|m[aá]s\s+)?cpu|procesos\s+con\s+m[aá]s\s+cpu|"
+        r"quien\s+consume\s+(?:m[aá]s\s+)?cpu|que\s+consume\s+m[aá]s\s+cpu)$",
+        clean,
+    ):
+        return "process_monitor", {"action": "top_cpu"}
+
+    m_kill_proc = re.search(
+        r"^(?:mata|matar|termina|terminar)\s+(?:el\s+proceso\s+)?(?:con\s+pid\s+)?(\d+)$"
+        r"|^(?:mata|matar|termina|terminar)\s+el\s+proceso\s+(?:colgado\s+de\s+|de\s+)?"
+        r"([a-zA-Z0-9_.-]+)$",
+        clean,
+    )
+    if m_kill_proc:
+        target = m_kill_proc.group(1) or m_kill_proc.group(2)
+        return "kill_process", {"target": target}
+
+    # 23. Estado de repositorio Git
+    if re.search(
+        r"^(?:c[oó]mo\s+est[aá]\s+el\s+repo(?:sitorio)?(?:\s+actual)?|"
+        r"tengo\s+cambios\s+sin\s+(?:commitear|confirmar)|"
+        r"estado\s+del\s+repo(?:sitorio)?|estado\s+de\s+git|git\s+status)$",
+        clean,
+    ):
+        return "git_status", {}
+
     return None
+
 
 
 class ToolCall(NamedTuple):
@@ -700,7 +789,61 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         action = args.get("action", "toggle")
         return "night_mode_control", {"action": action}
 
+    # 27. Gestion e inspeccion de puertos
+    if norm_name in ("portaction", "portcontrol", "port", "puerto", "checkport", "killport"):
+        raw_port = args.get("port") or args.get("number") or 80
+        action = args.get("action", "check")
+        if norm_name == "killport":
+            action = "kill"
+        if norm_name == "checkport":
+            action = "check"
+        try:
+            port = int(raw_port)
+        except (ValueError, TypeError):
+            port = 80
+        return "port_action", {"port": port, "action": action}
+
+    # 28. Gestion de contenedores Docker / Podman
+    if norm_name in (
+        "containeraction",
+        "containercontrol",
+        "container",
+        "contenedor",
+        "docker",
+        "podman",
+    ):
+        action = args.get("action", "list")
+        target = args.get("target") or args.get("name") or args.get("container", "")
+        return "container_action", {"action": action, "target": target}
+
+    # 29. Monitor de procesos (CPU / RAM)
+    if norm_name in (
+        "processmonitor",
+        "processresourcemonitor",
+        "topcpu",
+        "topram",
+        "procesos",
+        "monitorprocesos",
+    ):
+        action = args.get("action", "top_cpu")
+        if norm_name == "topram":
+            action = "top_ram"
+        if norm_name == "topcpu":
+            action = "top_cpu"
+        return "process_monitor", {"action": action}
+
+    # 30. Terminar proceso
+    if norm_name in ("killprocess", "terminateprocess", "matarproceso", "cerrarproceso"):
+        target = args.get("target") or args.get("pid") or args.get("name") or ""
+        return "kill_process", {"target": str(target)}
+
+    # 31. Estado de repositorio Git
+    if norm_name in ("gitstatus", "git", "repostatus", "estadorepo", "repocontrol"):
+        path = args.get("path") or args.get("repo", "")
+        return "git_status", {"path": str(path)}
+
     return None
+
 
 
 def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
@@ -853,5 +996,33 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         action = args.get("action", "toggle")
         return night_mode_control(action=action)
 
+    if tool_name == "port_action":
+        from jota.tools.devops import port_action
+        port = int(args.get("port", 80))
+        action = args.get("action", "check")
+        return port_action(port=port, action=action)
+
+    if tool_name == "container_action":
+        from jota.tools.devops import container_action
+        action = args.get("action", "list")
+        target = args.get("target") or args.get("name") or args.get("container", "")
+        return container_action(action=action, target=target)
+
+    if tool_name == "process_monitor":
+        from jota.tools.devops import process_monitor_action
+        action = args.get("action", "top_cpu")
+        return process_monitor_action(action=action)
+
+    if tool_name == "kill_process":
+        from jota.tools.devops import kill_process_action
+        target = args.get("target") or args.get("pid") or args.get("name", "")
+        return kill_process_action(target=str(target))
+
+    if tool_name == "git_status":
+        from jota.tools.devops import git_status_action
+        path = args.get("path") or args.get("repo", "")
+        return git_status_action(path=str(path))
+
     return False, f"Herramienta no implementada: {tool_name}"
+
 
