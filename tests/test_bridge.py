@@ -102,7 +102,8 @@ class TestPhoneManager:
 class TestPhoneTool:
     """Verifica la herramienta de voz jota/tools/phone.py y su integracion con el LLM."""
 
-    def test_phone_control_status_unconnected(self):
+    @patch("jota.tools.phone._execute_via_http", return_value="No hay ningun telefono conectado.")
+    def test_phone_control_status_unconnected(self, mock_http):
         msg = phone_control("status")
         assert isinstance(msg, str)
         assert len(msg) > 0
@@ -112,11 +113,11 @@ class TestPhoneTool:
         assert "no reconocida" in msg or "no esta activo" in msg
 
     def test_router_parse_phone_control(self):
-        out = "TOOL: phone_control(action='ring')\nHaciendo sonar tu telefono."
+        out = "TOOL: phone_control(action='battery')\nConsultando la bateria."
         parsed = parse_llm_tool_call(out)
         assert parsed is not None
         assert parsed.name == "phone_control"
-        assert parsed.args["action"] == "ring"
+        assert parsed.args["action"] == "battery"
 
     def test_router_parse_phone_control_alias(self):
         out = "TOOL: phone(action='status')"
@@ -125,12 +126,14 @@ class TestPhoneTool:
         assert parsed.name == "phone_control"
         assert parsed.args["action"] == "status"
 
-    def test_execute_tool_phone_control(self):
-        success, msg = execute_tool("phone_control", {"action": "ring"})
+    @patch("jota.tools.phone._execute_via_http", return_value="Estado consultado.")
+    def test_execute_tool_phone_control(self, mock_http):
+        success, msg = execute_tool("phone_control", {"action": "status"})
         assert success is True
         assert len(msg) > 0
 
-    def test_phone_control_torch_and_silent(self):
+    @patch("jota.tools.phone._execute_via_http", return_value="Linterna activada.")
+    def test_phone_control_torch_and_silent(self, mock_http):
         msg_torch = phone_control("torch", "on")
         assert isinstance(msg_torch, str)
         msg_silent = phone_control("silent", "on")
