@@ -1,6 +1,6 @@
 """Tests basicos de Fase 1."""
 
-from jota.stt import strip_wake_word
+from jota.stt import extract_wake_word, strip_wake_word
 
 
 class TestStripWakeWord:
@@ -46,4 +46,42 @@ class TestStripWakeWord:
 
     def test_j_letra_simple(self):
         assert strip_wake_word("J qué hora es") == "qué hora es"
+
+
+class TestExtractWakeWord:
+    """Prueba la funcion extract_wake_word para deteccion manos libres."""
+
+    def test_extract_jota_con_comando(self):
+        has_wake, cmd = extract_wake_word("Jota abre el explorador")
+        assert has_wake is True
+        assert cmd == "abre el explorador"
+
+    def test_extract_solo_wake_word(self):
+        has_wake, cmd = extract_wake_word("Jota")
+        assert has_wake is True
+        assert cmd == ""
+
+        has_wake_j, cmd_j = extract_wake_word("J")
+        assert has_wake_j is True
+        assert cmd_j == ""
+
+    def test_extract_hota_variante(self):
+        has_wake, cmd = extract_wake_word("Hota pon la música")
+        assert has_wake is True
+        assert cmd == "pon la música"
+
+    def test_extract_sin_wake_word(self):
+        has_wake, cmd = extract_wake_word("hola cómo estás")
+        assert has_wake is False
+        assert cmd == "hola cómo estás"
+
+        has_wake_2, cmd_2 = extract_wake_word("hoy hace buen día")
+        assert has_wake_2 is False
+        assert cmd_2 == "hoy hace buen día"
+
+    def test_extract_cadena_vacia(self):
+        has_wake, cmd = extract_wake_word("   ")
+        assert has_wake is False
+        assert cmd == ""
+
 

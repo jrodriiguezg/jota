@@ -32,6 +32,7 @@ except Exception as exc:
     sys.exit(1)
 
 from jota.config import (
+    ORB_AUTO_HIDE_IDLE,
     ORB_CORNER,
     ORB_FPS,
     ORB_MARGIN_X,
@@ -130,17 +131,25 @@ class JotaOrbWindow(Gtk.Window):
         if clean in ("listen", "listening", "grabar", "grabando"):
             self.state = "listening"
             self.target_alpha = 1.0
+            if ORB_AUTO_HIDE_IDLE and not self.get_visible():
+                self.show_all()
         elif clean in ("think", "thinking", "procesar", "pensando"):
             self.state = "thinking"
             self.target_alpha = 1.0
+            if ORB_AUTO_HIDE_IDLE and not self.get_visible():
+                self.show_all()
         elif clean in ("speak", "speaking", "hablar", "hablando"):
             self.state = "speaking"
             self.target_alpha = 1.0
+            if ORB_AUTO_HIDE_IDLE and not self.get_visible():
+                self.show_all()
         elif clean in ("idle", "hide", "ocultar", "off"):
             self.state = "idle"
             self.target_alpha = 0.0
         else:
             self.state = clean
+            if ORB_AUTO_HIDE_IDLE and not self.get_visible():
+                self.show_all()
 
         if level >= 0.0:
             self.voice_level = min(1.0, max(0.0, level))
@@ -165,6 +174,8 @@ class JotaOrbWindow(Gtk.Window):
             if self.current_alpha > 0.0:
                 self.current_alpha = 0.0
                 self.darea.queue_draw()
+            if ORB_AUTO_HIDE_IDLE and self.get_visible():
+                self.hide()
 
         return True
 
@@ -518,7 +529,10 @@ def main() -> None:
     if args.demo:
         run_demo(window)
 
-    window.show_all()
+    if not ORB_AUTO_HIDE_IDLE or args.demo:
+        window.show_all()
+    else:
+        window.hide()
 
     try:
         Gtk.main()

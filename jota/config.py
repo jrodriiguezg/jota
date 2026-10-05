@@ -81,9 +81,9 @@ LLM_ENABLE_THINKING = False
 PIPER_BIN = Path(shutil.which("piper") or (Path.home() / ".local" / "bin" / "piper"))
 PIPER_MODEL = MODELS_DIR / "piper" / "es_ES-sharvard-medium.onnx"
 
-# ── Wake word ────────────────────────────────────────────────────────────────
+# ── Wake word y Escucha Manos Libres ─────────────────────────────────────────
 
-# Palabras que activan el asistente (en minúsculas).
+# Palabras que activan el asistente (en minusculas).
 # Se eliminan del inicio de la frase antes de pasar al LLM.
 WAKE_WORDS = ["jota", "hota", "j"]  # Whisper transcribe frecuentemente 'J' a secas
 
@@ -91,12 +91,23 @@ WAKE_WORDS = ["jota", "hota", "j"]  # Whisper transcribe frecuentemente 'J' a se
 # La wake word se reserva para activacion manos libres (sin teclas).
 REQUIRE_WAKE_WORD = False
 
+# Escucha continua en segundo plano sin pulsar teclas
+HANDSFREE_ENABLED = os.getenv("JOTA_HANDSFREE", "true").lower() in ("true", "1", "yes")
+# Umbral RMS de deteccion de voz (VAD) para microfono
+VAD_THRESHOLD = float(os.getenv("JOTA_VAD_THRESHOLD", "0.015"))
+# Segundos de silencio para delimitar el fin de una frase hablada
+VAD_SILENCE_TIMEOUT = float(os.getenv("JOTA_VAD_SILENCE", "0.65"))
+# Segundos de audio previo a conservar para no cortar el inicio de palabra
+VAD_PRE_SPEECH_DURATION = float(os.getenv("JOTA_VAD_PRE_SPEECH", "0.4"))
+# Duracion maxima de una orden de voz continua en segundos
+VAD_MAX_DURATION = float(os.getenv("JOTA_VAD_MAX_DURATION", "8.0"))
+
 # ── Audio ────────────────────────────────────────────────────────────────────
 
 AUDIO_SAMPLE_RATE = 16000   # Hz (whisper.cpp espera 16kHz)
 AUDIO_CHANNELS = 1
 AUDIO_DTYPE = "int16"
-# Duración máxima de grabación en segundos (por si no suelta la tecla)
+# Duracion maxima de grabacion en segundos (por si no suelta la tecla)
 AUDIO_MAX_DURATION = 30
 
 # Directorio y archivo temporal seguro para el audio grabado
@@ -119,6 +130,8 @@ ORB_MARGIN_X = 28
 ORB_MARGIN_Y = 28
 ORB_FPS = 60
 ORB_SOCKET_PATH = Path("/tmp/jota_orb.sock")
+# Ocultar completamente el orbe cuando este en reposo (idle) para que sea sigiloso
+ORB_AUTO_HIDE_IDLE = os.getenv("JOTA_ORB_AUTO_HIDE", "true").lower() in ("true", "1", "yes")
 
 # ── Herramientas (Fase 2) ────────────────────────────────────────────────────
 

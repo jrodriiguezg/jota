@@ -29,6 +29,7 @@ class AudioRecorder:
         self._recording = False
         self._max_blocks = int(AUDIO_MAX_DURATION * AUDIO_SAMPLE_RATE / 1024)
         self.level_callback = level_callback
+        self.last_peak: float = 0.0
 
     @property
     def is_recording(self) -> bool:
@@ -45,6 +46,7 @@ class AudioRecorder:
 
             self._frames = []
             self._recording = True
+            self.last_peak = 0.0
 
         logger.debug("Iniciando grabacion de audio...")
         try:
@@ -65,6 +67,8 @@ class AudioRecorder:
         if status:
             logger.warning("Aviso en stream de audio: %s", status)
 
+        peak = float(np.max(np.abs(indata))) / 32768.0
+        self.last_peak = peak
         cb = self.level_callback
         with self._lock:
             if self._recording:
@@ -77,7 +81,6 @@ class AudioRecorder:
         if cb and self._recording:
             try:
                 # Normalizar rms / pico del buffer int16 (-32768 a 32767)
-                peak = float(np.max(np.abs(indata))) / 32768.0
                 cb(min(1.0, peak * 2.8))
             except Exception:
                 pass
