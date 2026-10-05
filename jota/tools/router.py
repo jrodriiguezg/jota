@@ -519,7 +519,58 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     ):
         return "git_status", {}
 
+    # 24. PC-to-Mobile: Captura de pantalla, URL y archivos al telefono
+    m_ws_shot = re.search(
+        r"^(?:manda|mandar|envia|enviar|pasa|pasar)\s+(?:una\s+)?captura(?:\s+de\s+pantalla)?\s+"
+        r"(?:del\s+|de\s+)?(?:espacio|workspace)\s+(\d+)\s+al\s+(?:m[oó]vil|tel[eé]fono|celular)$",
+        clean,
+    )
+    if m_ws_shot:
+        return "phone_send_screenshot", {"workspace": int(m_ws_shot.group(1))}
+
+    if re.search(
+        r"^(?:manda|mandar|envia|enviar|pasa|pasar)\s+"
+        r"(?:(?:una\s+)?captura(?:\s+de\s+pantalla)?|la\s+pantalla)\s+"
+        r"al\s+(?:m[oó]vil|tel[eé]fono|celular)$",
+        clean,
+    ):
+        return "phone_send_screenshot", {}
+
+    m_url = re.search(
+        r"^(?:manda|mandar|envia|enviar|pasa|pasar)\s+(?:la\s+url|el\s+enlace|el\s+link)\s+"
+        r"(https?://\S+)\s+al\s+(?:m[oó]vil|tel[eé]fono|celular)$",
+        clean,
+    )
+    if m_url:
+        return "phone_send_url", {"url": m_url.group(1)}
+
+    if re.search(
+        r"^(?:manda|mandar|envia|enviar|pasa|pasar)\s+"
+        r"(?:la\s+url|este\s+enlace|el\s+enlace|el\s+link|esta\s+p[aá]gina)\s+"
+        r"al\s+(?:m[oó]vil|tel[eé]fono|celular)$"
+        r"|^(?:abre|abrir)\s+esta\s+p[aá]gina\s+en\s+el\s+(?:m[oó]vil|tel[eé]fono|celular)$",
+        clean,
+    ):
+        return "phone_send_url", {}
+
+    if re.search(
+        r"^(?:manda|mandar|envia|enviar|pasa|pasar)\s+"
+        r"(?:este\s+archivo|el\s+archivo\s+seleccionado|este\s+documento)\s+"
+        r"al\s+(?:m[oó]vil|tel[eé]fono|celular)$",
+        clean,
+    ):
+        return "phone_send_file", {"target": ""}
+
+    m_file = re.search(
+        r"^(?:manda|mandar|envia|enviar|pasa|pasar)\s+el\s+archivo\s+(.+)\s+"
+        r"al\s+(?:m[oó]vil|tel[eé]fono|celular)$",
+        clean,
+    )
+    if m_file:
+        return "phone_send_file", {"target": m_file.group(1).strip()}
+
     return None
+
 
 
 
@@ -842,7 +893,42 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         path = args.get("path") or args.get("repo", "")
         return "git_status", {"path": str(path)}
 
+    # 32. PC-to-Mobile (Capturas, archivos y URLs al telefono)
+    if norm_name in (
+        "phonesendscreenshot",
+        "sendscreenshottophone",
+        "capturamovil",
+        "mandarcapturaalmovil",
+    ):
+        raw_ws = args.get("workspace") or args.get("target") or args.get("id")
+        ws = int(raw_ws) if raw_ws is not None else None
+        res_ws = {}
+        if ws is not None:
+            res_ws["workspace"] = ws
+        return "phone_send_screenshot", res_ws
+
+    if norm_name in (
+        "phonesendurl",
+        "sendurltophone",
+        "urlmovil",
+        "mandarenlacealmovil",
+        "abrirurlmovil",
+    ):
+        url = args.get("url") or args.get("link") or ""
+        return "phone_send_url", {"url": str(url)}
+
+    if norm_name in (
+        "phonesendfile",
+        "sendfiletophone",
+        "archivomovil",
+        "mandararchivoalmovil",
+        "enviararchivoalmovil",
+    ):
+        target = args.get("target") or args.get("name") or args.get("file") or ""
+        return "phone_send_file", {"target": str(target)}
+
     return None
+
 
 
 
@@ -1023,6 +1109,19 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         path = args.get("path") or args.get("repo", "")
         return git_status_action(path=str(path))
 
+    if tool_name == "phone_send_screenshot":
+        from jota.tools.phone import send_screenshot_to_phone
+        return send_screenshot_to_phone(workspace=args.get("workspace"))
+
+    if tool_name == "phone_send_url":
+        from jota.tools.phone import send_active_url_to_phone
+        return send_active_url_to_phone(url=args.get("url", ""))
+
+    if tool_name == "phone_send_file":
+        from jota.tools.phone import send_active_file_to_phone
+        return send_active_file_to_phone(target=args.get("target", ""))
+
     return False, f"Herramienta no implementada: {tool_name}"
+
 
 

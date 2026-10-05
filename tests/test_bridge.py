@@ -398,5 +398,181 @@ class TestBridgeAPI:
         assert "mac" in data
 
 
+class TestMobileTransferFeatures:
+    """Verifica las transferencias del PC al telefono (Fase 3)."""
+
+    @pytest.fixture
+    def client(self):
+        with TestClient(app) as c:
+            yield c
+
+    def test_phone_send_file_endpoint_unauthorized(self, client):
+
+        resp = client.post(
+            "/api/v1/phone/send_file",
+            json={"filename": "test.png", "remote_path": "test.png"},
+        )
+        assert resp.status_code == 401
+
+    @patch("bridge.server.phone_manager.push_file_to_phone")
+    def test_phone_send_file_endpoint_success(self, mock_push, client):
+        mock_push.return_value = True
+        resp = client.post(
+            "/api/v1/phone/send_file",
+            headers={"X-Bridge-Key": BRIDGE_API_KEY},
+            json={"filename": "test.png", "remote_path": "test.png", "size_bytes": 1024},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+    @patch("jota.tools.phone.subprocess.run")
+    @patch("jota.tools.phone.shutil.which")
+    def test_capture_workspace_screenshot(self, mock_which, mock_run, tmp_path):
+        from jota.tools.phone import capture_workspace_screenshot
+
+        mock_which.side_effect = lambda cmd: "/usr/bin/" + cmd
+        p_ws = MagicMock(returncode=0, stdout='{"id": 1}')
+        p_mon = MagicMock(returncode=0, stdout='[{"name": "eDP-1", "activeWorkspace": {"id": 1}}]')
+        p_grim = MagicMock(returncode=0)
+
+        mock_run.side_effect = [p_ws, p_mon, MagicMock(), p_grim, MagicMock()]
+
+        with patch("jota.tools.phone.BRIDGE_TEMP_DIR", tmp_path):
+            with patch("pathlib.Path.exists", return_value=True):
+                path = capture_workspace_screenshot(workspace=3)
+                assert path is not None
+                assert "captura_espacio_3" in str(path)
+
+    @patch("jota.tools.phone.capture_workspace_screenshot")
+    @patch("jota.tools.phone.phone_control")
+    def test_send_screenshot_to_phone(self, mock_phone, mock_cap, tmp_path):
+        from jota.tools.phone import send_screenshot_to_phone
+
+        dummy_png = tmp_path / "shot.png"
+        dummy_png.touch()
+        mock_cap.return_value = dummy_png
+        mock_phone.return_value = "Enviando 'shot.png' a tu telefono."
+
+        ok, msg = send_screenshot_to_phone(workspace=3)
+        assert ok is True
+        assert "espacio 3" in msg
+
+    @patch("jota.tools.phone.subprocess.run")
+    @patch("jota.tools.phone.shutil.which")
+    def test_get_active_browser_url_from_clipboard(self, mock_which, mock_run):
+        from jota.tools.phone import get_active_browser_url
+
+        mock_which.return_value = "/usr/bin/wl-paste"
+        mock_run.return_value = MagicMock(returncode=0, stdout="https://github.com\n")
+
+        url = get_active_browser_url()
+        assert url == "https://github.com"
+
+    @patch("jota.tools.phone.get_active_browser_url")
+    @patch("jota.tools.phone.phone_control")
+    def test_send_active_url_to_phone(self, mock_phone, mock_get_url):
+        from jota.tools.phone import send_active_url_to_phone
+
+        mock_get_url.return_value = "https://example.com"
+        mock_phone.return_value = "Enlace enviado a tu movil."
+
+        ok, msg = send_active_url_to_phone()
+        assert ok is True
+        assert "Enlace" in msg
+
+    @patch("jota.tools.phone.subprocess.run")
+    @patch("jota.tools.phone.shutil.which")
+    def test_get_selected_or_active_file(self, mock_which, mock_run, tmp_path):
+        from jota.tools.phone import get_selected_or_active_file
+
+        sample_file = tmp_path / "document.pdf"
+        sample_file.touch()
+
+        mock_which.return_value = "/usr/bin/wl-paste"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=f"file://{sample_file}\n",
+        )
+
+        p = get_selected_or_active_file()
+        assert p == sample_file
+
+    @patch("jota.tools.phone.get_selected_or_active_file")
+    @patch("jota.tools.phone.phone_control")
+    def test_send_active_file_to_phone(self, mock_phone, mock_get_file, tmp_path):
+        from jota.tools.phone import send_active_file_to_phone
+
+        sample_file = tmp_path / "document.pdf"
+        sample_file.touch()
+        mock_get_file.return_value = sample_file
+        mock_phone.return_value = "Enviando 'document.pdf' a tu telefono."
+
+        ok, msg = send_active_file_to_phone("este archivo")
+        assert ok is True
+        assert "document.pdf" in msg
+
+    def test_mobile_transfer_fast_intents(self):
+        from jota.tools.router import match_fast_intent
+
+        assert match_fast_intent("manda una captura del espacio 3 al movil") == (
+            "phone_send_screenshot",
+            {"workspace": 3},
+        )
+        assert match_fast_intent("manda una captura al movil") == (
+            "phone_send_screenshot",
+            {},
+        )
+        assert match_fast_intent("manda la pantalla al movil") == (
+            "phone_send_screenshot",
+            {},
+        )
+        assert match_fast_intent("manda la url al movil") == (
+            "phone_send_url",
+            {},
+        )
+        assert match_fast_intent("pasa esta pagina al movil") == (
+            "phone_send_url",
+            {},
+        )
+        assert match_fast_intent("manda este archivo al movil") == (
+            "phone_send_file",
+            {"target": ""},
+        )
+        assert match_fast_intent("manda el archivo notas.txt al movil") == (
+            "phone_send_file",
+            {"target": "notas.txt"},
+        )
+
+    def test_parse_llm_mobile_tools(self):
+        out1 = "TOOL: phone_send_screenshot(workspace=3)\nEnviando captura."
+        assert parse_llm_tool_call(out1) == ("phone_send_screenshot", {"workspace": 3})
+
+        out2 = "TOOL: phone_send_url()\nEnviando URL."
+        assert parse_llm_tool_call(out2) == ("phone_send_url", {"url": ""})
+
+        out3 = "TOOL: phone_send_file(target='')\nEnviando archivo."
+        assert parse_llm_tool_call(out3) == ("phone_send_file", {"target": ""})
+
+    def test_execute_tool_mobile(self):
+        with patch("jota.tools.phone.send_screenshot_to_phone") as mock_shot:
+            mock_shot.return_value = (True, "Captura enviada.")
+            ok, msg = execute_tool("phone_send_screenshot", {"workspace": 3})
+            assert ok is True
+            assert "Captura enviada" in msg
+
+        with patch("jota.tools.phone.send_active_url_to_phone") as mock_url:
+            mock_url.return_value = (True, "URL enviada.")
+            ok, msg = execute_tool("phone_send_url", {})
+            assert ok is True
+            assert "URL enviada" in msg
+
+        with patch("jota.tools.phone.send_active_file_to_phone") as mock_file:
+            mock_file.return_value = (True, "Archivo enviado.")
+            ok, msg = execute_tool("phone_send_file", {"target": ""})
+            assert ok is True
+            assert "Archivo enviado" in msg
+
+
+
 
 
