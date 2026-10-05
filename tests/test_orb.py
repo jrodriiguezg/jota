@@ -100,3 +100,36 @@ class TestOrbWindowLogic:
         win.set_state("idle")
         assert win.state == "idle"
         assert win.target_alpha == 0.0
+
+    def test_orb_auto_hide_idle_transition(self):
+        try:
+            import sys
+            for p in ["/usr/lib/python3.14/site-packages", "/usr/lib64/python3.14/site-packages"]:
+                if p not in sys.path:
+                    sys.path.append(p)
+
+            import gi
+            gi.require_version("Gdk", "3.0")
+            gi.require_version("Gtk", "3.0")
+            gi.require_version("GtkLayerShell", "0.1")
+            from jota.ui.orb import JotaOrbWindow
+        except Exception:
+            pytest.skip("GtkLayerShell no disponible en este entorno de prueba")
+
+        win = JotaOrbWindow(size=120, corner="bottom_right")
+        # Al activarse listening debe hacerse visible
+        win.set_state("listening", 0.5)
+        assert win.get_visible() is True
+        assert win.target_alpha == 1.0
+
+        # Al pasar a idle, target_alpha baja a 0
+        win.set_state("idle")
+        assert win.target_alpha == 0.0
+
+        # Simular avance de animacion hasta fadeout total
+        for _ in range(40):
+            win._on_tick()
+
+        # Debe haberse ocultado completamente (modo sigiloso)
+        assert win.current_alpha <= 0.005
+        assert win.get_visible() is False

@@ -91,6 +91,33 @@ def transcribe(audio_path: Path) -> str | None:
         txt_file.unlink(missing_ok=True)
 
 
+def extract_wake_word(text: str) -> tuple[bool, str]:
+    """
+    Comprueba si el texto comienza por un wake word ("jota", "hota", "j", etc.).
+    Devuelve (True, comando_limpio) si el wake word esta presente.
+    Si solo se pronuncio el wake word (ej. "Jota"), devuelve (True, "").
+    Si no se detecto el wake word, devuelve (False, text).
+    """
+    cleaned_start = re.sub(r"^[\s¡¿\"']+", "", text).strip()
+    if not cleaned_start:
+        return False, ""
+
+    normalized = cleaned_start.lower()
+    sorted_words = sorted(WAKE_WORDS, key=len, reverse=True)
+
+    for word in sorted_words:
+        pattern = rf"^{re.escape(word)}(?:[\s,\.!¿?¡\"':;\-]+|$)"
+        match = re.match(pattern, normalized)
+        if match:
+            cleaned = cleaned_start[match.end():].strip()
+            cleaned = re.sub(r"^[\s,\-:;!\.]+", "", cleaned)
+            cleaned = re.sub(r"^[¡¿]+", "", cleaned).strip()
+            logger.debug("Wake word '%s' detectado en: %r", word, text)
+            return True, cleaned
+
+    return False, cleaned_start
+
+
 def strip_wake_word(text: str, require_wake_word: bool = REQUIRE_WAKE_WORD) -> str | None:
     """
     Elimina el wake word del inicio de la frase si esta presente.
@@ -98,34 +125,13 @@ def strip_wake_word(text: str, require_wake_word: bool = REQUIRE_WAKE_WORD) -> s
         - Si tiene wake word, lo retira y devuelve el resto.
         - Si no tiene wake word, devuelve la frase limpia de signos iniciales.
     Si require_wake_word es True (modo manos libres):
-        - Devuelve None si no se detecto ningun wake word.
+        - Devuelve None si no se detecto ningun wake word o la frase quedo vacia.
     """
-    cleaned_start = re.sub(r"^[\s¡¿\"']+", "", text).strip()
-    if not cleaned_start:
-        return None
-
-    normalized = cleaned_start.lower()
-
-    # Ordenar por longitud descendente para que 'jota' tenga prioridad sobre 'j'
-    sorted_words = sorted(WAKE_WORDS, key=len, reverse=True)
-
-    for word in sorted_words:
-        # Exigir delimitador de palabra (espacio, puntuacion o fin de cadena)
-        pattern = rf"^{re.escape(word)}(?:[\s,\.!¿?¡\"':;\-]+|$)"
-        match = re.match(pattern, normalized)
-        if match:
-            cleaned = cleaned_start[match.end():].strip()
-            cleaned = re.sub(r"^[\s,\-:;!\.]+", "", cleaned)
-            # Limpiar signo de apertura residual si quedo suelto
-            cleaned = re.sub(r"^[¡¿]+", "", cleaned).strip()
-            logger.debug("Wake word '%s' detectado. Frase limpia: %r", word, cleaned)
-            return cleaned if cleaned else None
-
-    # Si no se encontro wake word
+    has_wake, command = extract_wake_word(text)
+    if has_wake:
+        return command if command else None
     if require_wake_word:
         logger.debug("No se detecto wake word requerido en: %r", text)
         return None
-
-    # En modo push-to-talk (sin wake word obligatorio), se procesa la frase directa
-    logger.debug("Procesando directamente en modo push-to-talk: %r", cleaned_start)
-    return cleaned_start
+    logger.debug("Procesando directamente en modo push-to-talk: %r", command)
+    return command if command else None
