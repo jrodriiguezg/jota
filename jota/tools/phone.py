@@ -479,43 +479,44 @@ def send_active_url_to_phone(url: str = "") -> tuple[bool, str]:
 
 def get_selected_or_active_file() -> Path | None:
     """Localiza el archivo seleccionado en el explorador o el mas reciente."""
-    # 1. Comprobar si hay URIs copiadas en el portapapeles (Dolphin / KDE)
+    # 1. Comprobar si hay URIs en el portapapeles o seleccion primaria (Dolphin / KDE)
     wl_paste = shutil.which("wl-paste")
     if wl_paste:
-        try:
-            res = subprocess.run(
-                [wl_paste, "-t", "text/uri-list"],
-                capture_output=True,
-                text=True,
-                timeout=1,
-                check=False,
-            )
-            if res.returncode == 0 and res.stdout.strip():
-                for line in res.stdout.strip().splitlines():
-                    if line.startswith("file://"):
-                        p = Path(unquote(urlparse(line.strip()).path))
-                        if p.is_file():
-                            return p
-        except Exception:
-            pass
+        for extra_args in [[], ["--primary"]]:
+            try:
+                res = subprocess.run(
+                    [wl_paste, *extra_args, "-t", "text/uri-list"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1,
+                    check=False,
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    for line in res.stdout.strip().splitlines():
+                        if line.startswith("file://"):
+                            p = Path(unquote(urlparse(line.strip()).path))
+                            if p.is_file():
+                                return p
+            except Exception:
+                pass
 
-        # 2. Comprobar texto plano del portapapeles
-        try:
-            res_txt = subprocess.run(
-                [wl_paste],
-                capture_output=True,
-                text=True,
-                timeout=1,
-                check=False,
-            )
-            if res_txt.returncode == 0:
-                candidate = Path(res_txt.stdout.strip()).expanduser()
-                if candidate.is_file():
-                    return candidate
-        except Exception:
-            pass
+            # Comprobar texto plano en clipboard o seleccion primaria
+            try:
+                res_txt = subprocess.run(
+                    [wl_paste, *extra_args],
+                    capture_output=True,
+                    text=True,
+                    timeout=1,
+                    check=False,
+                )
+                if res_txt.returncode == 0:
+                    candidate = Path(res_txt.stdout.strip()).expanduser()
+                    if candidate.is_file():
+                        return candidate
+            except Exception:
+                pass
 
-    # 3. Archivo reciente en Descargas o Documentos (ultimos 15 min)
+    # 2. Archivo reciente en Descargas o Documentos (ultimos 15 min)
     now = time.time()
     search_dirs = [
         Path.home() / "Descargas",
@@ -557,5 +558,30 @@ def send_active_file_to_phone(target: str = "") -> tuple[bool, str]:
 
     msg = phone_control("send_file", str(file_path))
     return True, msg
+
+
+def main() -> None:
+    """Punto de entrada de consola para enviar archivos seleccionados al movil."""
+    import sys
+
+    files = sys.argv[1:]
+    if not files:
+        ok, msg = send_active_file_to_phone()
+        print(msg)
+        if shutil.which("notify-send"):
+            subprocess.run(["notify-send", "Jota Bridge", msg], check=False)
+        return
+
+    for f in files:
+        p = Path(f).resolve()
+        if p.is_file():
+            ok, msg = send_active_file_to_phone(str(p))
+            print(msg)
+            if shutil.which("notify-send"):
+                subprocess.run(["notify-send", "Jota Bridge", msg], check=False)
+
+
+if __name__ == "__main__":
+    main()
 
 
