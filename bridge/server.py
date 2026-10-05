@@ -242,6 +242,14 @@ class PhoneUrlPayload(BaseModel):
     device_id: str | None = None
 
 
+class PhoneFilePayload(BaseModel):
+    filename: str
+    remote_path: str
+    size_bytes: int = 0
+    device_id: str | None = None
+
+
+
 # ── Endpoints de Salud y Estado ──────────────────────────────────────────────
 
 
@@ -529,7 +537,25 @@ async def send_url_to_phone(payload: PhoneUrlPayload):
     return {"success": True, "message": "Enlace enviado al telefono."}
 
 
+@app.post("/api/v1/phone/send_file", dependencies=[Depends(verify_auth)])
+async def send_file_to_phone(payload: PhoneFilePayload):
+    """Notifica al telefono para que descargue un archivo del PC."""
+    ok = await phone_manager.push_file_to_phone(
+        filename=payload.filename,
+        remote_path=payload.remote_path,
+        size_bytes=payload.size_bytes,
+        device_id=payload.device_id,
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No hay ningun telefono conectado para recibir el archivo.",
+        )
+    return {"success": True, "message": f"Archivo '{payload.filename}' enviado al telefono."}
+
+
 @app.get("/api/v1/phone/status", dependencies=[Depends(verify_auth)])
+
 def get_phone_status(device_id: str | None = None):
     """Obtiene el ultimo estado reportado por el telefono (bateria, etc.)."""
     return phone_manager.get_device_status(device_id=device_id)

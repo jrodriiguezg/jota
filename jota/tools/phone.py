@@ -5,9 +5,15 @@ hacerlo sonar, consultar su bateria y enviarle texto o enlaces.
 """
 
 import asyncio
+import json
 import logging
+import shutil
+import sqlite3
+import subprocess
+import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -261,7 +267,295 @@ def _execute_via_http(action: str, value: str) -> str:
                     return "Enlace abierto en tu telefono."
                 return "No se pudo enviar el enlace al telefono."
 
+            if action in ("send_file", "sendfile", "enviar_archivo", "enviararchivo", "archivo"):
+                target_file = _resolve_file_for_phone(value)
+                if not target_file:
+                    return f"No encontre el archivo '{value}' para enviar."
+                try:
+                    rel_path = str(target_file.relative_to(Path.home()))
+                except ValueError:
+                    rel_path = str(target_file)
+                resp = client.post(
+                    "/api/v1/phone/send_file",
+                    json={
+                        "filename": target_file.name,
+                        "remote_path": rel_path,
+                        "size_bytes": target_file.stat().st_size,
+                    },
+                )
+                if resp.status_code == 200:
+                    return f"Enviando '{target_file.name}' a tu telefono."
+                return "No se pudo enviar el archivo al telefono."
+
     except Exception as e:
         logger.debug("Servidor Bridge local no disponible en %s: %s", base_url, e)
 
     return "El servicio Jota Bridge no esta activo o no hay ningun telefono vinculado."
+
+
+def capture_workspace_screenshot(workspace: int | None = None) -> Path | None:
+    """
+    Captura una imagen del escritorio completo o de un workspace especifico de Hyprland.
+    Retorna la ruta al archivo PNG generado en BRIDGE_TEMP_DIR.
+    """
+    grim = shutil.which("grim")
+    if not grim:
+        logger.error("grim no esta disponible para capturar pantalla.")
+        return None
+
+    BRIDGE_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = int(time.time())
+    ws_label = f"espacio_{workspace}" if workspace else "pantalla"
+    out_file = BRIDGE_TEMP_DIR / f"captura_{ws_label}_{stamp}.png"
+
+    hyprctl = shutil.which("hyprctl")
+    if not hyprctl or workspace is None:
+        try:
+            res = subprocess.run(
+                [grim, str(out_file)],
+                capture_output=True,
+                timeout=3,
+                check=False,
+            )
+            if res.returncode == 0 and out_file.exists():
+                return out_file
+        except Exception as e:
+            logger.error("Error al capturar pantalla con grim: %s", e)
+        return None
+
+    try:
+        # Obtener workspace activo actual
+        ws_proc = subprocess.run(
+            [hyprctl, "activeworkspace", "-j"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        cur_ws = 1
+        if ws_proc.returncode == 0 and ws_proc.stdout.strip():
+            cur_ws = json.loads(ws_proc.stdout).get("id", 1)
+
+        # Si el espacio solicitado ya esta activo en el monitor enfocado
+        if cur_ws == workspace:
+            res = subprocess.run(
+                [grim, str(out_file)],
+                capture_output=True,
+                timeout=3,
+                check=False,
+            )
+            if res.returncode == 0 and out_file.exists():
+                return out_file
+            return None
+
+        # Comprobar si esta activo en algun otro monitor
+        mon_proc = subprocess.run(
+            [hyprctl, "monitors", "-j"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if mon_proc.returncode == 0 and mon_proc.stdout.strip():
+            monitors = json.loads(mon_proc.stdout)
+            for m in monitors:
+                if m.get("activeWorkspace", {}).get("id") == workspace:
+                    m_name = m.get("name")
+                    res = subprocess.run(
+                        [grim, "-o", m_name, str(out_file)],
+                        capture_output=True,
+                        timeout=3,
+                        check=False,
+                    )
+                    if res.returncode == 0 and out_file.exists():
+                        return out_file
+
+        # Si no esta visible en ningun monitor, cambiar momentaneamente
+        subprocess.run(
+            [hyprctl, "dispatch", "workspace", str(workspace)],
+            timeout=2,
+            check=False,
+        )
+        time.sleep(0.15)
+        res = subprocess.run(
+            [grim, str(out_file)],
+            capture_output=True,
+            timeout=3,
+            check=False,
+        )
+
+        # Restaurar workspace original
+        subprocess.run(
+            [hyprctl, "dispatch", "workspace", str(cur_ws)],
+            timeout=2,
+            check=False,
+        )
+
+        if res.returncode == 0 and out_file.exists():
+            return out_file
+    except Exception as e:
+        logger.error("Error al capturar workspace %s: %s", workspace, e)
+
+    return None
+
+
+def send_screenshot_to_phone(workspace: int | None = None) -> tuple[bool, str]:
+    """Captura el workspace o la pantalla y la envia al telefono."""
+    shot_path = capture_workspace_screenshot(workspace)
+    if not shot_path or not shot_path.exists():
+        return False, "No se pudo tomar la captura de pantalla."
+
+    msg = phone_control("send_file", str(shot_path))
+    if "No" in msg and "encontre" in msg:
+        return False, msg
+
+    ws_text = f"del espacio {workspace}" if workspace else "de la pantalla"
+    return True, f"Captura {ws_text} enviada a tu telefono."
+
+
+def get_active_browser_url() -> str | None:
+    """Detecta la URL activa del navegador o copiada en el portapapeles."""
+    # 1. Verificar portapapeles
+    wl_paste = shutil.which("wl-paste")
+    if wl_paste:
+        try:
+            res = subprocess.run(
+                [wl_paste],
+                capture_output=True,
+                text=True,
+                timeout=1,
+                check=False,
+            )
+            if res.returncode == 0:
+                text_val = res.stdout.strip()
+                if text_val.startswith("http://") or text_val.startswith("https://"):
+                    return text_val
+        except Exception:
+            pass
+
+    # 2. Consultar historial reciente de Firefox (places.sqlite)
+    ff_dir = Path.home() / ".mozilla" / "firefox"
+    if ff_dir.exists():
+        profiles = list(ff_dir.glob("*.default-release")) or list(ff_dir.glob("*.default*"))
+        for prof in profiles:
+            db_path = prof / "places.sqlite"
+            if db_path.exists():
+                tmp_db = Path("/tmp") / f"places_tmp_{prof.name}.sqlite"
+                try:
+                    shutil.copy2(db_path, tmp_db)
+                    con = sqlite3.connect(tmp_db)
+                    cur = con.cursor()
+                    cur.execute(
+                        """
+                        SELECT url FROM moz_places
+                        JOIN moz_historyvisits ON moz_places.id = moz_historyvisits.place_id
+                        ORDER BY visit_date DESC LIMIT 1
+                        """
+                    )
+                    row = cur.fetchone()
+                    con.close()
+                    tmp_db.unlink(missing_ok=True)
+                    if row and row[0]:
+                        return row[0]
+                except Exception as e:
+                    logger.debug("Error consultando places.sqlite: %s", e)
+
+    return None
+
+
+def send_active_url_to_phone(url: str = "") -> tuple[bool, str]:
+    """Envia una URL al navegador del telefono."""
+    target_url = str(url).strip()
+    is_valid_http = target_url.startswith("http://") or target_url.startswith("https://")
+    if not target_url or not is_valid_http:
+        target_url = get_active_browser_url() or ""
+
+    if not target_url:
+        return False, "No encontre ninguna URL activa ni en el portapapeles para enviar."
+
+    msg = phone_control("open_url", target_url)
+    return True, msg
+
+
+def get_selected_or_active_file() -> Path | None:
+    """Localiza el archivo seleccionado en el explorador o el mas reciente."""
+    # 1. Comprobar si hay URIs copiadas en el portapapeles (Dolphin / KDE)
+    wl_paste = shutil.which("wl-paste")
+    if wl_paste:
+        try:
+            res = subprocess.run(
+                [wl_paste, "-t", "text/uri-list"],
+                capture_output=True,
+                text=True,
+                timeout=1,
+                check=False,
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                for line in res.stdout.strip().splitlines():
+                    if line.startswith("file://"):
+                        p = Path(unquote(urlparse(line.strip()).path))
+                        if p.is_file():
+                            return p
+        except Exception:
+            pass
+
+        # 2. Comprobar texto plano del portapapeles
+        try:
+            res_txt = subprocess.run(
+                [wl_paste],
+                capture_output=True,
+                text=True,
+                timeout=1,
+                check=False,
+            )
+            if res_txt.returncode == 0:
+                candidate = Path(res_txt.stdout.strip()).expanduser()
+                if candidate.is_file():
+                    return candidate
+        except Exception:
+            pass
+
+    # 3. Archivo reciente en Descargas o Documentos (ultimos 15 min)
+    now = time.time()
+    search_dirs = [
+        Path.home() / "Descargas",
+        Path.home() / "Downloads",
+        Path.home() / "Documentos",
+    ]
+    for folder in search_dirs:
+        if folder.exists():
+            files = [f for f in folder.iterdir() if f.is_file()]
+            if files:
+                files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                latest = files[0]
+                if now - latest.stat().st_mtime < 900:  # 15 minutos
+                    return latest
+
+    return None
+
+
+def send_active_file_to_phone(target: str = "") -> tuple[bool, str]:
+    """Envia un archivo especifico o seleccionado al movil."""
+    clean_target = str(target).strip()
+    is_generic = not clean_target or clean_target.lower() in (
+        "este",
+        "este archivo",
+        "el archivo",
+        "seleccionado",
+        "el archivo seleccionado",
+        "este documento",
+        "documento",
+    )
+
+    if is_generic:
+        file_path = get_selected_or_active_file()
+    else:
+        file_path = _resolve_file_for_phone(clean_target)
+
+    if not file_path or not file_path.is_file():
+        return False, "No encontre ningun archivo seleccionado ni reciente para enviar."
+
+    msg = phone_control("send_file", str(file_path))
+    return True, msg
+
+
