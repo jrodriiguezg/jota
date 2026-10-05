@@ -37,14 +37,30 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.ClipData
+import android.content.ClipboardManager
+import androidx.compose.animation.core.*
 import androidx.core.content.ContextCompat
 import com.jota.link.audio.AudioHelper
 import com.jota.link.network.BridgeClient
+import com.jota.link.network.JotaDiscoveryManager
+import com.jota.link.network.WakeOnLan
 import com.jota.link.service.JotaBridgeService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+data class ChatMessageItem(
+    val id: Long = System.currentTimeMillis(),
+    val sender: String,
+    val text: String,
+    val time: String,
+    val audioBytes: ByteArray? = null
+)
 
 class MainActivity : ComponentActivity() {
     private val audioHelper = AudioHelper()
@@ -79,11 +95,25 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = Color(0xFFCBA6F7),
-                    primaryContainer = Color(0xFF313244),
-                    secondary = Color(0xFF89B4FA),
-                    background = Color(0xFF1E1E2E),
-                    surface = Color(0xFF181825),
+                    primary = Color(0xFFA8C7FA),
+                    onPrimary = Color(0xFF062E6F),
+                    primaryContainer = Color(0xFF1E3A5F),
+                    onPrimaryContainer = Color(0xFFD3E3FD),
+                    secondary = Color(0xFF7FCFFF),
+                    onSecondary = Color(0xFF003548),
+                    secondaryContainer = Color(0xFF1E3542),
+                    onSecondaryContainer = Color(0xFFC2E7FF),
+                    tertiary = Color(0xFF80CBC4),
+                    background = Color(0xFF0C1017),
+                    onBackground = Color(0xFFE1E3EB),
+                    surface = Color(0xFF111722),
+                    onSurface = Color(0xFFE1E3EB),
+                    surfaceVariant = Color(0xFF1A2330),
+                    onSurfaceVariant = Color(0xFFC3C7D2),
+                    outline = Color(0xFF2C394A),
+                    outlineVariant = Color(0xFF1F2937),
+                    error = Color(0xFFF2B8B5),
+                    onError = Color(0xFF601410)
                 )
             ) {
                 Surface(
@@ -111,16 +141,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startBridgeService() {
+    private fun startBridgeService(enableWakeWord: Boolean? = null) {
+        val wakeWordPref = enableWakeWord ?: prefs.getBoolean("enable_wake_word", false)
         val intent = Intent(this, JotaBridgeService::class.java).apply {
             putExtra("baseUrl", serverUrl)
             putExtra("apiKey", apiKey)
             putExtra("deviceId", deviceId)
+            putExtra("enableWakeWord", wakeWordPref)
         }
         startForegroundService(intent)
     }
 
-    private fun updateConnectionConfig(newUrl: String, newKey: String, newId: String) {
+    private fun updateConnectionConfig(newUrl: String, newKey: String, newId: String, newMac: String? = null) {
         serverUrl = newUrl.trim()
         apiKey = newKey.trim()
         deviceId = newId.trim()
@@ -129,12 +161,29 @@ class MainActivity : ComponentActivity() {
             putString("server_url", serverUrl)
             putString("api_key", apiKey)
             putString("device_id", deviceId)
+            if (!newMac.isNullOrBlank()) {
+                putString("pc_mac", newMac.trim())
+            }
             apply()
         }
 
         bridgeClient?.disconnect()
         bridgeClient = BridgeClient(this, serverUrl, apiKey, deviceId)
         startBridgeService()
+
+        // Autodescubrir MAC del PC para Wake-on-LAN
+        if (newMac.isNullOrBlank()) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val net = bridgeClient?.getPcNetworkInfo()
+                    val mac = net?.optString("primary_mac", "") ?: ""
+                    if (mac.isNotEmpty()) {
+                        prefs.edit().putString("pc_mac", mac).apply()
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
         Toast.makeText(this, "Ajustes guardados. Reconectando...", Toast.LENGTH_SHORT).show()
     }
 
@@ -146,6 +195,9 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null) return
+        if (intent.getBooleanExtra("EXTRA_START_VOICE", false)) {
+            Toast.makeText(this, "Modo de voz activado desde acceso rapido", Toast.LENGTH_SHORT).show()
+        }
         val action = intent.action
 
         if (Intent.ACTION_SEND == action) {
@@ -250,6 +302,39 @@ class MainActivity : ComponentActivity() {
         var inputUrl by remember { mutableStateOf(serverUrl) }
         var inputKey by remember { mutableStateOf(apiKey) }
         var inputId by remember { mutableStateOf(deviceId) }
+        var isScanningMdns by remember { mutableStateOf(false) }
+        var wakeWordEnabled by remember { mutableStateOf(prefs.getBoolean("enable_wake_word", false)) }
+        var savedMac by remember { mutableStateOf(prefs.getString("pc_mac", "") ?: "") }
+        var showQrPairingDialog by remember { mutableStateOf(false) }
+        var qrJsonInput by remember { mutableStateOf("") }
+
+        val chatMessages = remember { mutableStateListOf<ChatMessageItem>() }
+        var pcBatteryPct by remember { mutableIntStateOf(-1) }
+        var pcBatteryCharging by remember { mutableStateOf(false) }
+        var mediaTitle by remember { mutableStateOf("") }
+        var mediaArtist by remember { mutableStateOf("") }
+        var mediaStatus by remember { mutableStateOf("") }
+        var lastAudioBytes by remember { mutableStateOf<ByteArray?>(null) }
+
+        val infiniteTransition = rememberInfiniteTransition(label = "voicePulse")
+        val pulseScale by infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = if (isRecording) 1.25f else 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(700, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulseScale"
+        )
+        val pulseAlpha by infiniteTransition.animateFloat(
+            initialValue = 0.5f,
+            targetValue = if (isRecording) 0f else 0.5f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(700, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulseAlpha"
+        )
 
         var screenshotsList by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
         var currentScreenshotIndex by remember { mutableStateOf(0) }
@@ -375,6 +460,16 @@ class MainActivity : ComponentActivity() {
                         val win = status.optJSONObject("active_window")?.optString("class", "Ninguna") ?: "Ninguna"
                         val title = status.optJSONObject("active_window")?.optString("title", "") ?: ""
                         activeWindowText = if (title.isNotBlank()) "$win ($title)" else win
+
+                        val bat = status.optJSONObject("battery")
+                        pcBatteryPct = if (bat?.optBoolean("present") == true) bat.optInt("percent", -1) else -1
+                        pcBatteryCharging = bat?.optBoolean("charging") ?: false
+
+                        val med = status.optJSONObject("media")
+                        mediaTitle = med?.optString("title", "") ?: ""
+                        mediaArtist = med?.optString("artist", "") ?: ""
+                        mediaStatus = med?.optString("status", "") ?: ""
+
                         isOnline = true
                     }
                 } catch (e: Exception) {
@@ -384,26 +479,27 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        fun playAudioResponse(resp: JSONObject?) {
-            if (resp == null) return
+        fun playAudioResponse(resp: JSONObject?): ByteArray? {
+            if (resp == null) return null
+            var bytes: ByteArray? = null
             val audioB64 = resp.optString("audio_base64", "")
             if (audioB64.isNotEmpty()) {
-                scope.launch {
-                    try {
-                        val audioBytes = Base64.decode(audioB64, Base64.DEFAULT)
-                        audioHelper.playAudio(audioBytes)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
+                try {
+                    bytes = Base64.decode(audioB64, Base64.DEFAULT)
+                    lastAudioBytes = bytes
+                    scope.launch { audioHelper.playAudio(bytes) }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
             } else {
                 val audioId = resp.optString("audio_id", "")
                 if (audioId.isNotEmpty()) {
                     scope.launch {
                         try {
-                            val audioBytes = bridgeClient?.downloadAudio(audioId)
-                            if (audioBytes != null && audioBytes.isNotEmpty()) {
-                                audioHelper.playAudio(audioBytes)
+                            val dlBytes = bridgeClient?.downloadAudio(audioId)
+                            if (dlBytes != null && dlBytes.isNotEmpty()) {
+                                lastAudioBytes = dlBytes
+                                audioHelper.playAudio(dlBytes)
                             }
                         } catch (e: Exception) {
                             e.printStackTrace()
@@ -411,33 +507,86 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            return bytes
         }
 
         Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                TopAppBar(
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Jota", fontWeight = FontWeight.Bold, fontSize = 22.sp)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isOnline) Color(0xFFA6E3A1) else Color(0xFFF38BA8))
-                            )
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "JOTA",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 20.sp,
+                                    letterSpacing = 1.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isOnline) Color(0xFF1B382A) else Color(0xFF3B1F24)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isOnline) Color(0xFF4CAF50) else Color(0xFFE57373))
+                                        )
+                                        Spacer(modifier = Modifier.width(5.dp))
+                                        Text(
+                                            text = if (isOnline) "ONLINE" else "OFFLINE",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isOnline) Color(0xFF81C784) else Color(0xFFE57373)
+                                        )
+                                    }
+                                }
+                            }
+                            if (pcBatteryPct >= 0) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Batería PC: $pcBatteryPct%${if (pcBatteryCharging) " (Cargando)" else ""}",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                    },
-                    actions = {
-                        TextButton(onClick = { showHelpDialog = true }) {
-                            Text("Comandos", color = MaterialTheme.colorScheme.secondary)
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(
+                                onClick = { showHelpDialog = true },
+                                shape = CircleShape,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Comandos", fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = { showSettings = !showSettings },
+                                shape = CircleShape,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(if (showSettings) "Cerrar" else "Ajustes", fontSize = 11.sp)
+                            }
                         }
-                        TextButton(onClick = { showSettings = !showSettings }) {
-                            Text(if (showSettings) "Cerrar" else "Ajustes", color = MaterialTheme.colorScheme.primary)
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
-                )
+                    }
+                }
             }
         ) { padding ->
             Column(
@@ -449,41 +598,224 @@ class MainActivity : ComponentActivity() {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // ── Panel Desplegable de Ajustes ──
+                // ── Panel Desplegable de Ajustes (Material 3 Expressive) ──
                 AnimatedVisibility(visible = showSettings) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF313244)),
-                        shape = RoundedCornerShape(16.dp)
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(28.dp)
                     ) {
                         Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text("Conexion Tailscale", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Conexión y Red",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+
+                            // 1. Auto-descubrimiento ZeroConf / mDNS
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Auto-detectar mDNS", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        Text("Buscar Jota en la red local", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            if (!isScanningMdns) {
+                                                isScanningMdns = true
+                                                Toast.makeText(this@MainActivity, "Buscando Jota en la red...", Toast.LENGTH_SHORT).show()
+                                                val dm = JotaDiscoveryManager(
+                                                    this@MainActivity,
+                                                    onServerFound = { host, port, name ->
+                                                        inputUrl = "http://$host:$port"
+                                                        isScanningMdns = false
+                                                        Toast.makeText(this@MainActivity, "Detectado: $name ($host:$port)", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    onDiscoveryFinished = { count ->
+                                                        isScanningMdns = false
+                                                        if (count == 0) {
+                                                            Toast.makeText(this@MainActivity, "No se detectó ningún PC por mDNS", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                )
+                                                dm.startDiscovery(5000L)
+                                            }
+                                        },
+                                        enabled = !isScanningMdns,
+                                        shape = CircleShape,
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(if (isScanningMdns) "Buscando..." else "Escanear LAN", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+
+                            // 2. Presets de Canales Rápidos
+                            Text("Canales Rápidos", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    "Cable ADB" to "http://127.0.0.1:8765",
+                                    "USB Tether" to "http://192.168.42.1:8765",
+                                    "Bluetooth" to "http://192.168.44.1:8765"
+                                ).forEach { (label, url) ->
+                                    val isSelected = inputUrl == url
+                                    FilledTonalButton(
+                                        onClick = { inputUrl = url },
+                                        shape = CircleShape,
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(label, fontSize = 10.sp, maxLines = 1)
+                                    }
+                                }
+                            }
+
                             OutlinedTextField(
                                 value = inputUrl,
                                 onValueChange = { inputUrl = it },
                                 label = { Text("Server URL") },
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
                             )
                             OutlinedTextField(
                                 value = inputKey,
                                 onValueChange = { inputKey = it },
                                 label = { Text("API Key") },
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
                             )
                             OutlinedTextField(
                                 value = inputId,
                                 onValueChange = { inputId = it },
                                 label = { Text("Device ID") },
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
                             )
+
+                            // 3. Wake Word on-device ("Jota")
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Wake Word 'Jota' on-device", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                        Text("Escucha en segundo plano y vibra al activar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Switch(
+                                        checked = wakeWordEnabled,
+                                        onCheckedChange = { checked ->
+                                            wakeWordEnabled = checked
+                                            prefs.edit().putBoolean("enable_wake_word", checked).apply()
+                                            val intent = Intent(this@MainActivity, JotaBridgeService::class.java).apply {
+                                                action = JotaBridgeService.ACTION_TOGGLE_WAKE_WORD
+                                                putExtra("enable", checked)
+                                            }
+                                            startService(intent)
+                                            Toast.makeText(
+                                                this@MainActivity,
+                                                if (checked) "Wake Word 'Jota' activo" else "Wake Word desactivado",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    )
+                                }
+                            }
+
+                            // 4. Wake-on-LAN (WoL) y Emparejamiento QR
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Control de Energia (WoL)", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                            Text(
+                                                if (savedMac.isNotBlank()) "MAC: $savedMac" else "MAC no detectada todavia",
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        FilledTonalButton(
+                                            onClick = {
+                                                lifecycleScope.launch(Dispatchers.IO) {
+                                                    val targetMac = savedMac.ifBlank { "34:5A:60:99:8A:F2" }
+                                                    val ok = WakeOnLan.sendMagicPacket(targetMac)
+                                                    withContext(Dispatchers.Main) {
+                                                        Toast.makeText(
+                                                            this@MainActivity,
+                                                            if (ok) "Paquete magico WoL enviado" else "Error enviando paquete WoL",
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                }
+                                            },
+                                            shape = CircleShape,
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("Despertar PC", fontSize = 11.sp)
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Vincular con QR / JSON", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        FilledTonalButton(
+                                            onClick = { showQrPairingDialog = true },
+                                            shape = CircleShape,
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("Escanear / Pegar", fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+
                             Button(
                                 onClick = {
                                     updateConnectionConfig(inputUrl, inputKey, inputId)
                                     showSettings = false
                                 },
+                                shape = CircleShape,
                                 modifier = Modifier.align(Alignment.End)
                             ) {
                                 Text("Guardar y Conectar")
@@ -492,81 +824,111 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // ── Seccion 1: Boton de Voz Push-to-Talk ──
+                // ── Seccion 1: Asistente y Boton Hero de Voz (Android 16 Expressive) ──
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF24273A)),
-                    shape = RoundedCornerShape(24.dp)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(32.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(20.dp),
+                        modifier = Modifier.padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = if (isRecording) "Escuchando... suelta para procesar" else "Manten pulsado para hablar",
+                            text = if (isRecording) "Escuchando... suelta para procesar" else "Mantén pulsado para hablar",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = if (isRecording) Color(0xFFF9E2AF) else Color(0xFFCAD3F5)
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isRecording) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.height(18.dp))
+                        Spacer(modifier = Modifier.height(20.dp))
 
-                        // Boton circular principal
+                        // Boton Hero con halo pulsante Material 3
                         Box(
                             contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(130.dp)
-                                .clip(CircleShape)
-                                .background(if (isRecording) Color(0xFFF38BA8) else Color(0xFFCBA6F7))
-                                .pointerInput(Unit) {
-                                    detectTapGestures(
-                                        onPress = {
-                                            isRecording = true
-                                            audioHelper.startRecording()
-                                            tryAwaitRelease()
-                                            isRecording = false
-                                            val wavBytes = audioHelper.stopRecording()
-                                            scope.launch {
-                                                try {
-                                                    replyText = "Procesando en el PC..."
-                                                    val resp = bridgeClient?.askVoice(wavBytes)
-                                                    lastPromptText = resp?.optString("prompt", "") ?: ""
-                                                    replyText = resp?.optString("response_text", "Sin respuesta") ?: ""
-                                                    isOnline = true
-                                                    refreshPcStatus()
-                                                    playAudioResponse(resp)
+                            modifier = Modifier.size(170.dp)
+                        ) {
+                            if (isRecording) {
+                                Box(
+                                    modifier = Modifier
+                                        .size((136 * pulseScale).dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha))
+                                )
+                            }
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isRecording) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.primary,
+                                shadowElevation = if (isRecording) 8.dp else 4.dp,
+                                modifier = Modifier
+                                    .size(136.dp)
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                isRecording = true
+                                                audioHelper.startRecording()
+                                                tryAwaitRelease()
+                                                isRecording = false
+                                                val wavBytes = audioHelper.stopRecording()
+                                                scope.launch {
+                                                    try {
+                                                        replyText = "Procesando en el PC..."
+                                                        val resp = bridgeClient?.askVoice(wavBytes)
+                                                        val p = resp?.optString("prompt", "") ?: ""
+                                                        val r = resp?.optString("response_text", "Sin respuesta") ?: ""
+                                                        lastPromptText = p
+                                                        replyText = r
+                                                        isOnline = true
+                                                        refreshPcStatus()
+                                                        val audioDl = playAudioResponse(resp)
 
-                                                    val toolExecuted = resp?.optJSONObject("tool_executed")
-                                                    val toolName = toolExecuted?.optString("name", "") ?: ""
-                                                    if (toolName in listOf("screenshot", "show_screen", "screen_monitor", "screen", "captura")) {
-                                                        openScreenshotsGallery()
+                                                        val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+                                                        val nowStr = timeFormat.format(Date())
+                                                        if (p.isNotBlank()) {
+                                                            chatMessages.add(ChatMessageItem(sender = "Tú", text = p, time = nowStr))
+                                                        }
+                                                        if (r.isNotBlank()) {
+                                                            chatMessages.add(ChatMessageItem(sender = "Jota", text = r, time = nowStr, audioBytes = audioDl))
+                                                        }
+
+                                                        val toolExecuted = resp?.optJSONObject("tool_executed")
+                                                        val toolName = toolExecuted?.optString("name", "") ?: ""
+                                                        if (toolName in listOf("screenshot", "show_screen", "screen_monitor", "screen", "captura")) {
+                                                            openScreenshotsGallery()
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        replyText = "Fallo de conexion: ${e.message}"
+                                                        isOnline = false
                                                     }
-                                                } catch (e: Exception) {
-                                                    replyText = "Fallo de conexion: ${e.message}"
-                                                    isOnline = false
                                                 }
                                             }
-                                        }
+                                        )
+                                    }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = if (isRecording) "Soltar" else "Hablar",
+                                        color = if (isRecording) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onPrimary,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 18.sp,
+                                        letterSpacing = 0.5.sp
                                     )
                                 }
-                        ) {
-                            Text(
-                                text = if (isRecording) "Soltar" else "Hablar",
-                                color = Color(0xFF11111B),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
-                            )
+                            }
                         }
 
-                        // ── Seccion 2: Entrada de Texto para Peticiones ──
-                        Spacer(modifier = Modifier.height(18.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        // Entrada de texto estilo Pill SearchBar
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             OutlinedTextField(
                                 value = textChatInput,
                                 onValueChange = { textChatInput = it },
-                                placeholder = { Text("Escribe una peticion al PC...") },
+                                placeholder = { Text("Escribe una petición...") },
                                 modifier = Modifier.weight(1f),
                                 maxLines = 1,
-                                shape = RoundedCornerShape(12.dp)
+                                shape = CircleShape
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(
@@ -578,11 +940,19 @@ class MainActivity : ComponentActivity() {
                                             try {
                                                 lastPromptText = prompt
                                                 replyText = "Consultando a Jota..."
+                                                val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+                                                val nowStr = timeFormat.format(Date())
+                                                chatMessages.add(ChatMessageItem(sender = "Tú", text = prompt, time = nowStr))
+
                                                 val resp = bridgeClient?.askText(prompt, generateAudio = true, playOnPc = true)
-                                                replyText = resp?.optString("response_text", "") ?: ""
+                                                val r = resp?.optString("response_text", "") ?: ""
+                                                replyText = r
                                                 isOnline = true
                                                 refreshPcStatus()
-                                                playAudioResponse(resp)
+                                                val audioDl = playAudioResponse(resp)
+                                                if (r.isNotBlank()) {
+                                                    chatMessages.add(ChatMessageItem(sender = "Jota", text = r, time = nowStr, audioBytes = audioDl))
+                                                }
 
                                                 val toolExecuted = resp?.optJSONObject("tool_executed")
                                                 val toolName = toolExecuted?.optString("name", "") ?: ""
@@ -595,99 +965,455 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 },
-                                shape = RoundedCornerShape(12.dp)
+                                shape = CircleShape,
+                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp)
                             ) {
-                                Text("Enviar")
+                                Text("Enviar", fontWeight = FontWeight.Bold)
                             }
                         }
 
-                        // Globo de respuesta
+                        // Respuesta rápida
                         if (lastPromptText.isNotEmpty() || replyText.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(14.dp))
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0xFF181825), RoundedCornerShape(14.dp))
-                                    .padding(14.dp)
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surface
                             ) {
-                                if (lastPromptText.isNotEmpty()) {
-                                    Text("Tu: $lastPromptText", fontSize = 13.sp, color = Color(0xFFA6ADC8))
-                                }
-                                if (replyText.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text("Jota: $replyText", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFF89B4FA))
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    if (lastPromptText.isNotEmpty()) {
+                                        Text("Tú: $lastPromptText", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (replyText.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text("Jota: $replyText", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                // ── Seccion 3: Tarjeta de Estado del PC ──
+                // ── Seccion 2: Reproductor Multimedia (Estilo Android 16) ──
+                if (mediaTitle.isNotBlank()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(28.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "REPRODUCIENDO",
+                                    fontSize = 10.sp,
+                                    letterSpacing = 1.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = mediaTitle,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (mediaArtist.isNotBlank()) {
+                                    Text(
+                                        text = mediaArtist,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FilledTonalIconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            bridgeClient?.executePcAction("previous")
+                                            refreshPcStatus()
+                                        }
+                                    },
+                                    shape = CircleShape
+                                ) {
+                                    Text("|<", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                FilledTonalIconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            bridgeClient?.executePcAction("play_pause")
+                                            refreshPcStatus()
+                                        }
+                                    },
+                                    shape = CircleShape,
+                                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                ) {
+                                    Text(
+                                        if (mediaStatus.lowercase().contains("play")) "||" else ">",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                FilledTonalIconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            bridgeClient?.executePcAction("next")
+                                            refreshPcStatus()
+                                        }
+                                    },
+                                    shape = CircleShape
+                                ) {
+                                    Text(">|", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Seccion 3: Acciones Rápidas del PC (Tiles Android 16) ──
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF24273A)),
-                    shape = RoundedCornerShape(20.dp)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(28.dp)
                 ) {
-                    Column(modifier = Modifier.padding(18.dp)) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(
+                            text = "ACCIONES DEL PC",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            letterSpacing = 1.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilledTonalButton(
+                                onClick = {
+                                    scope.launch {
+                                        val (_, msg) = bridgeClient?.executePcAction("lock") ?: Pair(false, "Sin conexion")
+                                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                shape = RoundedCornerShape(18.dp),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Text("Bloquear", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            FilledTonalButton(
+                                onClick = {
+                                    scope.launch {
+                                        val (_, msg) = bridgeClient?.executePcAction("mute") ?: Pair(false, "Sin conexion")
+                                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                shape = RoundedCornerShape(18.dp),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Text("Silenciar", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            FilledTonalButton(
+                                onClick = { captureNewScreenshotNow() },
+                                shape = RoundedCornerShape(18.dp),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Text("Captura", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilledTonalButton(
+                                onClick = {
+                                    scope.launch {
+                                        try {
+                                            val pcClip = bridgeClient?.getPcClipboard() ?: ""
+                                            if (pcClip.isNotBlank()) {
+                                                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                cm.setPrimaryClip(ClipData.newPlainText("PC Clipboard", pcClip))
+                                                Toast.makeText(this@MainActivity, "Pegado en móvil: ${pcClip.take(30)}...", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(this@MainActivity, "Portapapeles del PC vacío", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(18.dp),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Text("Pegar del PC", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            FilledTonalButton(
+                                onClick = {
+                                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val phoneClip = cm.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                                    if (phoneClip.isNotBlank()) {
+                                        scope.launch {
+                                            val ok = bridgeClient?.setPcClipboard(phoneClip) ?: false
+                                            Toast.makeText(
+                                                this@MainActivity,
+                                                if (ok) "Copiado al PC con éxito" else "Fallo al enviar al PC",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    } else {
+                                        Toast.makeText(this@MainActivity, "Portapapeles del móvil vacío", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                shape = RoundedCornerShape(18.dp),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Text("Copiar al PC", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+
+                // ── Seccion 4: Historial de Conversación (Burbujas Expressive) ──
+                if (chatMessages.isNotEmpty()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(28.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "CONVERSACIÓN",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    letterSpacing = 1.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                TextButton(
+                                    onClick = { chatMessages.clear() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Limpiar", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+
+                            chatMessages.takeLast(10).forEach { msg ->
+                                val isUser = msg.sender == "Tú"
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
+                                ) {
+                                    Surface(
+                                        shape = if (isUser) {
+                                            RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 4.dp)
+                                        } else {
+                                            RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 4.dp, bottomEnd = 20.dp)
+                                        },
+                                        color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                                        modifier = Modifier.widthIn(max = 300.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f, fill = false)) {
+                                                Text(
+                                                    text = "${msg.sender} - ${msg.time}",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.primary
+                                                )
+                                                Spacer(modifier = Modifier.height(3.dp))
+                                                Text(
+                                                    text = msg.text,
+                                                    fontSize = 13.sp,
+                                                    color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                            if (msg.audioBytes != null) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                FilledTonalButton(
+                                                    onClick = {
+                                                        scope.launch { audioHelper.playAudio(msg.audioBytes) }
+                                                    },
+                                                    shape = CircleShape,
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("Audio", fontSize = 10.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Seccion 5: Estado y Métricas del PC (Tiles Android 16) ──
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(28.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Estado del PC", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "ESTADO DEL PC",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    letterSpacing = 1.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = activeWindowText,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FilledTonalButton(
                                     onClick = { openScreenshotsGallery() },
-                                    shape = RoundedCornerShape(10.dp)
+                                    shape = CircleShape,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                 ) {
-                                    Text("Capturas")
+                                    Text("Capturas", fontSize = 11.sp)
                                 }
                                 Button(
                                     onClick = { refreshPcStatus() },
-                                    shape = RoundedCornerShape(10.dp)
+                                    shape = CircleShape,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                 ) {
-                                    Text("Actualizar")
+                                    Text("Actualizar", fontSize = 11.sp)
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Ventana activa: $activeWindowText", fontSize = 13.sp, color = Color(0xFFCAD3F5))
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Grid 2x2 de métricas estilo Android 16
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // Tile CPU
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text("CPU", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("$cpuLoad", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text("Carga media (1m)", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+
+                            // Tile RAM
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text("RAM", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("${memPct.toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    LinearProgressIndicator(
+                                        progress = { (memPct / 100.0).toFloat().coerceIn(0f, 1f) },
+                                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)
+                                    )
+                                }
+                            }
+                        }
 
                         Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Carga CPU", fontSize = 12.sp, color = Color(0xFFA6ADC8))
-                            Text("$cpuLoad", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
 
-                        Spacer(modifier = Modifier.height(8.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("Memoria RAM", fontSize = 12.sp, color = Color(0xFFA6ADC8))
-                            Text("${memPct.toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        LinearProgressIndicator(
-                            progress = { (memPct / 100.0).toFloat().coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
-                        )
+                            // Tile Disco
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text("DISCO", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("${diskPct.toInt()}%", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.secondary)
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    LinearProgressIndicator(
+                                        progress = { (diskPct / 100.0).toFloat().coerceIn(0f, 1f) },
+                                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)
+                                    )
+                                }
+                            }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Disco Principal", fontSize = 12.sp, color = Color(0xFFA6ADC8))
-                            Text("${diskPct.toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            // Tile Batería
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text("BATERÍA PC", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    if (pcBatteryPct >= 0) {
+                                        Text(
+                                            "$pcBatteryPct%",
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = if (pcBatteryPct <= 20) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        LinearProgressIndicator(
+                                            progress = { (pcBatteryPct / 100.0).toFloat().coerceIn(0f, 1f) },
+                                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                                            color = if (pcBatteryPct <= 20) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
+                                        )
+                                    } else {
+                                        Text("AC", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.tertiary)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text("Corriente continua", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
                         }
-                        LinearProgressIndicator(
-                            progress = { (diskPct / 100.0).toFloat().coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
-                        )
                     }
                 }
             }
@@ -696,6 +1422,9 @@ class MainActivity : ComponentActivity() {
             if (showScreenshotDialog) {
                 AlertDialog(
                     onDismissRequest = { showScreenshotDialog = false },
+                    shape = RoundedCornerShape(32.dp),
+                    containerColor = Color(0xFF161C26),
+                    tonalElevation = 6.dp,
                     title = {
                         Column {
                             Row(
@@ -703,12 +1432,12 @@ class MainActivity : ComponentActivity() {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Capturas del PC", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                OutlinedButton(
+                                Text("Capturas del PC", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFFE2E8F0))
+                                FilledTonalButton(
                                     onClick = { captureNewScreenshotNow() },
                                     enabled = !isScreenshotLoading,
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    shape = CircleShape,
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                                 ) {
                                     Text("Capturar ahora", fontSize = 11.sp)
                                 }
@@ -717,17 +1446,23 @@ class MainActivity : ComponentActivity() {
                                 val currentItem = screenshotsList.getOrNull(currentScreenshotIndex)
                                 val dateStr = currentItem?.optString("date_str", "") ?: ""
                                 val fname = currentItem?.optString("filename", "") ?: ""
-                                Spacer(modifier = Modifier.height(4.dp))
+                                Spacer(modifier = Modifier.height(6.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(
-                                        "${currentScreenshotIndex + 1} de ${screenshotsList.size}",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            "${currentScreenshotIndex + 1} de ${screenshotsList.size}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
                                     Text(
                                         dateStr.ifBlank { fname },
                                         fontSize = 11.sp,
@@ -752,7 +1487,7 @@ class MainActivity : ComponentActivity() {
                                     contentDescription = "Captura de pantalla",
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .clip(RoundedCornerShape(20.dp))
                                 )
                             } else {
                                 Text(
@@ -771,40 +1506,45 @@ class MainActivity : ComponentActivity() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Button(
+                                    FilledTonalButton(
                                         onClick = {
                                             if (currentScreenshotIndex < screenshotsList.size - 1) {
                                                 loadScreenshotAtIndex(currentScreenshotIndex + 1)
                                             }
                                         },
                                         enabled = !isScreenshotLoading && currentScreenshotIndex < screenshotsList.size - 1,
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                        shape = CircleShape,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
                                         Text("< Anterior", fontSize = 11.sp)
                                     }
-                                    Button(
+                                    FilledTonalButton(
                                         onClick = {
                                             if (currentScreenshotIndex > 0) {
                                                 loadScreenshotAtIndex(currentScreenshotIndex - 1)
                                             }
                                         },
                                         enabled = !isScreenshotLoading && currentScreenshotIndex > 0,
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                        shape = CircleShape,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
                                         Text("Siguiente >", fontSize = 11.sp)
                                     }
                                 }
 
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    TextButton(
+                                    FilledTonalButton(
                                         onClick = { saveCurrentScreenshotToPhone() },
-                                        enabled = currentScreenshotBitmap != null
+                                        enabled = currentScreenshotBitmap != null,
+                                        shape = CircleShape,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
-                                        Text("Guardar", fontSize = 12.sp)
+                                        Text("Guardar", fontSize = 11.sp)
                                     }
-                                    TextButton(onClick = { showScreenshotDialog = false }) {
+                                    TextButton(
+                                        onClick = { showScreenshotDialog = false },
+                                        shape = CircleShape
+                                    ) {
                                         Text("Cerrar", fontSize = 12.sp)
                                     }
                                 }
@@ -818,30 +1558,155 @@ class MainActivity : ComponentActivity() {
             if (showHelpDialog) {
                 AlertDialog(
                     onDismissRequest = { showHelpDialog = false },
-                    title = { Text("Comandos Disponibles", fontWeight = FontWeight.Bold) },
+                    shape = RoundedCornerShape(32.dp),
+                    containerColor = Color(0xFF161C26),
+                    tonalElevation = 6.dp,
+                    title = {
+                        Text(
+                            "Comandos Disponibles",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = Color(0xFFE2E8F0)
+                        )
+                    },
                     text = {
                         Column(
                             modifier = Modifier.verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("Todos ejecutables mediante la voz o texto:", fontSize = 13.sp)
+                            Text(
+                                "Ejecutables mediante voz o texto:",
+                                fontSize = 12.sp,
+                                color = Color(0xFFA6ADC8)
+                            )
 
-                            Text("Multimedia y Audio", fontWeight = FontWeight.SemiBold, color = Color(0xFFCBA6F7))
-                            Text("- sube / baja el volumen\n- silencia el audio / quita silencio\n- pausa la musica / reproduce\n- siguiente cancion / cancion anterior", fontSize = 12.sp)
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color(0xFF1B2332),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("Multimedia y Audio", fontWeight = FontWeight.Bold, color = Color(0xFFCBA6F7), fontSize = 13.sp)
+                                    Text("sube / baja el volumen\nsilencia el audio / quita silencio\npausa la musica / reproduce\nsiguiente cancion / cancion anterior", fontSize = 12.sp, color = Color(0xFFE2E8F0))
+                                }
+                            }
 
-                            Text("Control del PC y Escritorios", fontWeight = FontWeight.SemiBold, color = Color(0xFF89B4FA))
-                            Text("- bloquea el PC / suspende el equipo\n- cierra la ventana activa\n- pasa al escritorio [1-9]\n- mueve la ventana al escritorio [1-9]\n- haz una captura de pantalla\n- ¿como esta el PC?", fontSize = 12.sp)
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color(0xFF1B2332),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("Control del PC y Escritorios", fontWeight = FontWeight.Bold, color = Color(0xFF89B4FA), fontSize = 13.sp)
+                                    Text("bloquea el PC / suspende el equipo\ncierra la ventana activa\npasa al escritorio [1-9]\nmueve la ventana al escritorio [1-9]\nhaz una captura de pantalla\ncomo esta el PC?", fontSize = 12.sp, color = Color(0xFFE2E8F0))
+                                }
+                            }
 
-                            Text("Telefono Vinculado", fontWeight = FontWeight.SemiBold, color = Color(0xFFF9E2AF))
-                            Text("- encuentra mi movil / haz sonar mi telefono\n- ¿cuanta bateria le queda al movil?\n- enciende / apaga la linterna del movil\n- pon el movil en silencio\n- manda al movil la ultima captura\n- manda al movil el archivo [nombre]\n- envia al movil este enlace https://...", fontSize = 12.sp)
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color(0xFF1B2332),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("Telefono Vinculado", fontWeight = FontWeight.Bold, color = Color(0xFFF9E2AF), fontSize = 13.sp)
+                                    Text("encuentra mi movil / haz sonar mi telefono\ncuanta bateria le queda al movil?\nenciende / apaga la linterna del movil\npon el movil en silencio\nmanda al movil la ultima captura\nmanda al movil el archivo [nombre]\nenvia al movil este enlace https://...", fontSize = 12.sp, color = Color(0xFFE2E8F0))
+                                }
+                            }
 
-                            Text("Utilidades y Asistente", fontWeight = FontWeight.SemiBold, color = Color(0xFFA6E3A1))
-                            Text("- ¿que tiempo hace en [ciudad]? / ¿va a llover hoy?\n- anota [tarea o nota]\n- ¿que notas tengo pendientes?\n- avisame en [X] minutos para [motivo]\n- abre [aplicacion] / buscame en la web [consulta]", fontSize = 12.sp)
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color(0xFF1B2332),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("Utilidades y Asistente", fontWeight = FontWeight.Bold, color = Color(0xFFA6E3A1), fontSize = 13.sp)
+                                    Text("que tiempo hace en [ciudad]? / va a llover hoy?\nanota [tarea o nota]\nque notas tengo pendientes?\navisame en [X] minutos para [motivo]\nabre [aplicacion] / buscame en la web [consulta]", fontSize = 12.sp, color = Color(0xFFE2E8F0))
+                                }
+                            }
                         }
                     },
                     confirmButton = {
-                        Button(onClick = { showHelpDialog = false }) {
-                            Text("Entendido")
+                        FilledTonalButton(
+                            onClick = { showHelpDialog = false },
+                            shape = CircleShape,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Entendido", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                )
+            }
+
+            // ── Modal de Emparejamiento por QR / JSON ──
+            if (showQrPairingDialog) {
+                AlertDialog(
+                    onDismissRequest = { showQrPairingDialog = false },
+                    shape = RoundedCornerShape(32.dp),
+                    containerColor = Color(0xFF161C26),
+                    tonalElevation = 6.dp,
+                    title = {
+                        Text(
+                            "Vincular con Jota PC",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = Color(0xFFE2E8F0)
+                        )
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                "Pega el texto generado por 'python -m bridge.qr' en tu PC o escaneado:",
+                                fontSize = 12.sp,
+                                color = Color(0xFFA6ADC8)
+                            )
+                            OutlinedTextField(
+                                value = qrJsonInput,
+                                onValueChange = { qrJsonInput = it },
+                                placeholder = { Text("{\"url\": \"http://...\", \"api_key\": \"...\"}") },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                minLines = 3,
+                                maxLines = 6
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(
+                                onClick = { showQrPairingDialog = false },
+                                shape = CircleShape
+                            ) {
+                                Text("Cancelar", fontSize = 12.sp)
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            FilledTonalButton(
+                                onClick = {
+                                    try {
+                                        val json = JSONObject(qrJsonInput.trim())
+                                        val url = json.optString("url", inputUrl)
+                                        val key = json.optString("api_key", inputKey)
+                                        val mac = json.optString("mac", "")
+                                        inputUrl = url
+                                        inputKey = key
+                                        if (mac.isNotEmpty()) {
+                                            savedMac = mac
+                                        }
+                                        updateConnectionConfig(url, key, inputId, mac)
+                                        showQrPairingDialog = false
+                                        showSettings = false
+                                        Toast.makeText(this@MainActivity, "Vinculacion aplicada", Toast.LENGTH_SHORT).show()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(this@MainActivity, "Formato JSON no valido", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                shape = CircleShape
+                            ) {
+                                Text("Vincular", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 )

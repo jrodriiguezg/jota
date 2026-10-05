@@ -117,6 +117,87 @@ def get_active_window_info() -> dict[str, Any]:
     return {"class": "", "title": "", "workspace": ""}
 
 
+def get_battery_status() -> dict[str, Any]:
+    """Obtiene el estado de la bateria del PC (portatil) si existe."""
+    power_supply = Path("/sys/class/power_supply")
+    if not power_supply.exists():
+        return {"present": False, "percent": None, "charging": False, "status": "unknown"}
+
+    try:
+        bat_dirs = sorted(list(power_supply.glob("BAT*")))
+        if not bat_dirs:
+            return {"present": False, "percent": None, "charging": False, "status": "no_battery"}
+
+        bat = bat_dirs[0]
+        cap_file = bat / "capacity"
+        stat_file = bat / "status"
+
+        percent = int(cap_file.read_text().strip()) if cap_file.exists() else None
+        status_text = stat_file.read_text().strip() if stat_file.exists() else "unknown"
+        charging = status_text.lower() in ("charging", "cargando")
+
+        return {
+            "present": True,
+            "percent": percent,
+            "charging": charging,
+            "status": status_text,
+        }
+    except Exception as e:
+        logger.debug("Error leyendo estado de bateria del PC: %s", e)
+        return {"present": False, "percent": None, "charging": False, "status": "error"}
+
+
+def get_media_status() -> dict[str, Any]:
+    """Obtiene informacion detallada de la reproduccion multimedia actual (MPRIS)."""
+    if not shutil.which("playerctl"):
+        return {"available": False, "status": "unavailable", "player": "", "title": "", "artist": "", "album": ""}
+
+    try:
+        proc_status = subprocess.run(
+            ["playerctl", "status"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if proc_status.returncode != 0 or not proc_status.stdout.strip():
+            return {"available": True, "status": "Stopped", "player": "", "title": "", "artist": "", "album": ""}
+
+        status = proc_status.stdout.strip()
+        format_str = "{{playerName}}\t{{title}}\t{{artist}}\t{{album}}"
+        proc_meta = subprocess.run(
+            ["playerctl", "metadata", "--format", format_str],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+
+        player, title, artist, album = "", "", "", ""
+        if proc_meta.returncode == 0 and proc_meta.stdout.strip():
+            parts = proc_meta.stdout.strip().split("\t")
+            if len(parts) >= 1:
+                player = parts[0]
+            if len(parts) >= 2:
+                title = parts[1]
+            if len(parts) >= 3:
+                artist = parts[2]
+            if len(parts) >= 4:
+                album = parts[3]
+
+        return {
+            "available": True,
+            "status": status,
+            "player": player,
+            "title": title,
+            "artist": artist,
+            "album": album,
+        }
+    except Exception as e:
+        logger.debug("Error al leer estado multimedia: %s", e)
+        return {"available": False, "status": "error", "player": "", "title": "", "artist": "", "album": ""}
+
+
 def get_system_status() -> dict[str, Any]:
     """Retorna un resumen completo del estado del PC."""
     return {
@@ -125,17 +206,24 @@ def get_system_status() -> dict[str, Any]:
         "disk": get_disk_info(),
         "uptime_seconds": get_uptime_seconds(),
         "active_window": get_active_window_info(),
+        "battery": get_battery_status(),
+        "media": get_media_status(),
     }
 
 
 SCREENSHOTS_DIR = Path.home() / ".local" / "share" / "jota" / "screenshots"
 
 
-def capture_screen_bytes(save_history: bool = True) -> bytes:
+def capture_screen_bytes(
+    save_history: bool = True,
+    format: str = "png",
+    quality: int = 80,
+    scale: float = 1.0,
+) -> bytes:
     """
-    Captura la pantalla actual en Wayland usando grim y retorna los bytes PNG.
+    Captura la pantalla actual en Wayland usando grim y retorna los bytes solicitados.
+    Soporta formatos 'png' (por defecto) o 'jpeg'/'jpg' comprimido con ImageMagick (magick/convert).
     Lanza RuntimeError si grim falla o no esta disponible.
-    Guarda una copia en SCREENSHOTS_DIR si save_history es True.
     """
     cmd = ["grim", "-"]
     try:
@@ -149,16 +237,45 @@ def capture_screen_bytes(save_history: bool = True) -> bytes:
             err = result.stderr.decode("utf-8", errors="replace").strip()
             raise RuntimeError(f"grim fallo con codigo {result.returncode}: {err}")
 
-        img_bytes = result.stdout
-        if save_history and img_bytes:
+        raw_png_bytes = result.stdout
+        if not raw_png_bytes:
+            raise RuntimeError("grim retorno una captura vacia.")
+
+        if save_history:
             try:
                 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                (SCREENSHOTS_DIR / f"screenshot_{ts}.png").write_bytes(img_bytes)
+                (SCREENSHOTS_DIR / f"screenshot_{ts}.png").write_bytes(raw_png_bytes)
             except Exception as e:
                 logger.warning("No se pudo guardar copia de captura en historial: %s", e)
 
-        return img_bytes
+        # Si se solicita formato JPEG / JPG optimizado para red movil
+        clean_fmt = format.lower().strip()
+        if clean_fmt in ("jpeg", "jpg"):
+            magick_bin = shutil.which("magick") or shutil.which("convert")
+            if magick_bin:
+                conv_args = [magick_bin, "-"]
+                if 0.1 <= scale < 1.0:
+                    conv_args.extend(["-resize", f"{int(scale * 100)}%"])
+                conv_args.extend(["-quality", str(max(10, min(100, quality))), "jpg:-"])
+
+                conv_res = subprocess.run(
+                    conv_args,
+                    input=raw_png_bytes,
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                )
+                if conv_res.returncode == 0 and conv_res.stdout:
+                    logger.debug(
+                        "Captura convertida a JPEG (calidad %d): %d -> %d bytes",
+                        quality,
+                        len(raw_png_bytes),
+                        len(conv_res.stdout),
+                    )
+                    return conv_res.stdout
+
+        return raw_png_bytes
     except FileNotFoundError:
         raise RuntimeError("El binario 'grim' no se encuentra instalado en el sistema.")
     except subprocess.TimeoutExpired:
@@ -303,13 +420,17 @@ def set_clipboard_text(text: str) -> bool:
 def resolve_safe_file_path(requested_path: str) -> Path:
     """
     Resuelve y valida que la ruta solicitada sea segura para descargar.
-    Evita directory traversal y acceso a carpetas privadas del sistema.
+    Evita directory traversal, inyecciones de bytes nulos y acceso a carpetas privadas del sistema.
 
     Lanza ValueError si la ruta es invalida o insegura.
     Lanza FileNotFoundError si el archivo no existe.
     """
     if not requested_path or not requested_path.strip():
         raise ValueError("Ruta de archivo vacia.")
+
+    # Proteccion contra inyeccion de byte nulo
+    if "\x00" in requested_path:
+        raise ValueError("Caracter nulo invalido detectado en la ruta.")
 
     # Expandir tilde y resolver ruta canonica
     clean_str = os.path.expanduser(requested_path.strip())
@@ -394,3 +515,52 @@ def execute_pc_action(action: str) -> tuple[bool, str]:
             return False, f"Error al abrir URL: {e}"
 
     return False, f"Accion no reconocida: {action}"
+
+
+def get_pc_network_info() -> dict[str, Any]:
+    """
+    Obtiene la informacion de red del PC (hostname, interfaces, direcciones MAC para Wake-on-LAN).
+    """
+    import glob
+    import socket
+
+    hostname = socket.gethostname()
+    interfaces: list[dict[str, str]] = []
+    primary_mac = ""
+
+    for iface_path in sorted(glob.glob("/sys/class/net/*")):
+        iface_name = os.path.basename(iface_path)
+        if iface_name == "lo" or iface_name.startswith("docker"):
+            continue
+        try:
+            addr_file = os.path.join(iface_path, "address")
+            state_file = os.path.join(iface_path, "operstate")
+            mac = ""
+            state = "unknown"
+            if os.path.isfile(addr_file):
+                with open(addr_file, "r") as f:
+                    mac = f.read().strip()
+            if os.path.isfile(state_file):
+                with open(state_file, "r") as f:
+                    state = f.read().strip()
+
+            if mac and len(mac) == 17:
+                interfaces.append({
+                    "name": iface_name,
+                    "mac": mac,
+                    "state": state,
+                })
+                if state == "up" and not primary_mac:
+                    primary_mac = mac
+        except Exception as e:
+            logger.debug("Error leyendo interfaz %s: %s", iface_name, e)
+
+    if not primary_mac and interfaces:
+        primary_mac = interfaces[0]["mac"]
+
+    return {
+        "hostname": hostname,
+        "primary_mac": primary_mac,
+        "interfaces": interfaces,
+    }
+

@@ -8,6 +8,8 @@ import android.media.RingtoneManager
 import android.net.Uri
 import android.os.*
 import androidx.core.app.NotificationCompat
+import com.jota.link.audio.AudioHelper
+import com.jota.link.audio.WakeWordDetector
 import com.jota.link.network.BridgeClient
 import kotlinx.coroutines.*
 
@@ -16,10 +18,19 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
     private var vibrator: Vibrator? = null
     private var ringtone: android.media.Ringtone? = null
 
+    private var wakeWordDetector: WakeWordDetector? = null
+    private val audioHelper = AudioHelper()
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private var lastSyncedClipboard: String = ""
+    private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
+    private var clipboardDebounceJob: Job? = null
+
     companion object {
         const val CHANNEL_ID = "jota_bridge_channel"
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP_ALARM = "com.jota.link.STOP_ALARM"
+        const val ACTION_TOGGLE_WAKE_WORD = "com.jota.link.TOGGLE_WAKE_WORD"
     }
 
     override fun onCreate() {
@@ -32,6 +43,28 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
             @Suppress("DEPRECATION")
             getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         }
+
+        // Listener de portapapeles universal bidireccional con debounce
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        if (cm != null) {
+            clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
+                val clip = cm.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val text = clip.getItemAt(0).text?.toString() ?: ""
+                    if (text.isNotEmpty() && text != lastSyncedClipboard && text.length < 20000) {
+                        clipboardDebounceJob?.cancel()
+                        clipboardDebounceJob = serviceScope.launch {
+                            delay(400)
+                            if (text != lastSyncedClipboard) {
+                                lastSyncedClipboard = text
+                                bridgeClient?.sendClipboard(text)
+                            }
+                        }
+                    }
+                }
+            }
+            cm.addPrimaryClipChangedListener(clipboardListener)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -40,9 +73,16 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
             return START_STICKY
         }
 
+        if (intent?.action == ACTION_TOGGLE_WAKE_WORD) {
+            val enable = intent.getBooleanExtra("enable", false)
+            setupWakeWord(enable)
+            return START_STICKY
+        }
+
         val baseUrl = intent?.getStringExtra("baseUrl") ?: "http://100.64.0.1:8765"
         val apiKey = intent?.getStringExtra("apiKey") ?: "jota-secret-tailscale-key"
         val deviceId = intent?.getStringExtra("deviceId") ?: "android_phone"
+        val enableWakeWord = intent?.getBooleanExtra("enableWakeWord", false) ?: false
 
         startForeground(NOTIFICATION_ID, buildNotification("Conectando a Jota Bridge..."))
 
@@ -51,6 +91,8 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
             listener = this@JotaBridgeService
             connectWebSocket()
         }
+
+        setupWakeWord(enableWakeWord)
 
         return START_STICKY
     }
@@ -102,9 +144,11 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
     }
 
     override fun onClipboardReceived(text: String) {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        if (text.isEmpty() || text == lastSyncedClipboard) return
+        lastSyncedClipboard = text
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         val clip = ClipData.newPlainText("Jota PC", text)
-        cm.setPrimaryClip(clip)
+        cm?.setPrimaryClip(clip)
     }
 
     override fun onOpenUrl(url: String) {
@@ -160,6 +204,17 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
         }
     }
 
+    override fun onPcNotification(title: String, message: String) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notif = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setAutoCancel(true)
+            .build()
+        nm.notify((System.currentTimeMillis() % 10000).toInt() + 2000, notif)
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -182,12 +237,60 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
     }
 
     private fun updateNotification(text: String) {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIFICATION_ID, buildNotification(text))
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    private fun setupWakeWord(enable: Boolean) {
+        if (!enable) {
+            wakeWordDetector?.stopListening()
+            wakeWordDetector = null
+            return
+        }
+        if (wakeWordDetector != null && wakeWordDetector?.isListeningActive() == true) return
+
+        wakeWordDetector = WakeWordDetector(this, 0.85f, object : WakeWordDetector.WakeWordListener {
+            override fun onWakeWordDetected(confidence: Float, preRollAudio: ByteArray) {
+                updateNotification("¡Jota detectado! Escuchando orden...")
+                serviceScope.launch {
+                    try {
+                        wakeWordDetector?.stopListening()
+                        audioHelper.startRecording()
+                        delay(3500)
+                        val voiceWav = audioHelper.stopRecording()
+                        updateNotification("Procesando con Jota en PC...")
+
+                        val resp = bridgeClient?.askVoice(voiceWav)
+                        val reply = resp?.optString("response_text", "") ?: ""
+                        if (reply.isNotEmpty()) {
+                            onPcNotification("Jota", reply)
+                            val audioB64 = resp?.optString("audio_base64", "") ?: ""
+                            if (audioB64.isNotEmpty()) {
+                                val audioBytes = android.util.Base64.decode(audioB64, android.util.Base64.DEFAULT)
+                                audioHelper.playAudio(audioBytes)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    } finally {
+                        updateNotification("Conectado con Jota (PC) [Wake Word activo]")
+                        wakeWordDetector?.startListening()
+                    }
+                }
+            }
+        })
+        wakeWordDetector?.startListening()
     }
 
     override fun onDestroy() {
         stopAlarm()
+        wakeWordDetector?.stopListening()
+        clipboardDebounceJob?.cancel()
+        clipboardListener?.let {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.removePrimaryClipChangedListener(it)
+        }
+        serviceScope.cancel()
         bridgeClient?.disconnect()
         super.onDestroy()
     }

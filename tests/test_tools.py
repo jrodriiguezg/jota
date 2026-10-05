@@ -11,6 +11,7 @@ from jota.tools.router import (
 )
 from jota.tools.screenshot import take_screenshot_to_clipboard
 from jota.tools.search import clean_search_query, open_web_search
+import jota.tools.screen_vision
 
 
 class TestFastIntentRouter:
@@ -32,9 +33,14 @@ class TestFastIntentRouter:
         assert match_fast_intent("para la cancion") == ("media_control", {"action": "pause"})
         assert match_fast_intent("reproduce") == ("media_control", {"action": "play"})
         assert match_fast_intent("reanuda la musica") == ("media_control", {"action": "play"})
+        assert match_fast_intent("Inicia la reproducción de la música.") == ("media_control", {"action": "play"})
+        assert match_fast_intent("Inicia la reproducción.") == ("media_control", {"action": "play"})
+        assert match_fast_intent("inicia la musica") == ("media_control", {"action": "play"})
+        assert match_fast_intent("pon musica") == ("media_control", {"action": "play"})
         assert match_fast_intent("siguiente cancion") == ("media_control", {"action": "next"})
         assert match_fast_intent("cambia de cancion") == ("media_control", {"action": "next"})
         assert match_fast_intent("cancion anterior") == ("media_control", {"action": "previous"})
+
 
     def test_screenshot_intents(self):
         assert match_fast_intent("captura pantalla") == ("screenshot", {})
@@ -96,9 +102,39 @@ class TestFastIntentRouter:
             "move_to_workspace",
             {"target": 3},
         )
+        assert match_fast_intent("mueve feishin al escritorio 2") == (
+            "move_to_workspace",
+            {"target": 2, "app": "feishin"},
+        )
+        assert match_fast_intent("mueve la ventana de firefox al escritorio 1") == (
+            "move_to_workspace",
+            {"target": 1, "app": "firefox"},
+        )
         assert match_fast_intent("que tiempo hace hoy una albacete") == (
             "get_weather",
             {"city": "Albacete"},
+        )
+
+
+    def test_battery_and_media_fast_intents(self):
+        assert match_fast_intent("cuanta bateria le queda al pc") == ("get_pc_battery", {})
+        assert match_fast_intent("nivel de bateria") == ("get_pc_battery", {})
+        assert match_fast_intent("que cancion esta sonando") == ("get_now_playing", {})
+        assert match_fast_intent("que cancion suena") == ("get_now_playing", {})
+        assert match_fast_intent("que tema suena") == ("get_now_playing", {})
+
+    def test_power_confirmation_and_timer_fast_intents(self):
+        assert match_fast_intent("si confirma") == ("system_power", {"action": "confirm"})
+        assert match_fast_intent("confirmo") == ("system_power", {"action": "confirm"})
+        assert match_fast_intent("cancela") == ("system_power", {"action": "cancel"})
+        assert match_fast_intent("no cancela") == ("system_power", {"action": "cancel"})
+        assert match_fast_intent("cancela el temporizador") == ("cancel_timer", {})
+        assert match_fast_intent("cancela la alarma") == ("cancel_timer", {})
+
+    def test_notes_search_fast_intents(self):
+        assert match_fast_intent("busca en mis notas comprar leche") == (
+            "manage_notes",
+            {"action": "search", "query": "comprar leche"},
         )
 
     def test_non_tool_intent_returns_none(self):
@@ -171,6 +207,16 @@ class TestAppResolver:
         query = "abre el explorador de archivos por favor"
         assert _clean_app_query(query) == "explorador de archivos"
         assert _clean_app_query("lanza dolphin") == "dolphin"
+
+    def test_clean_app_query_sanitizes_injection(self):
+        cleaned = _clean_app_query("firefox; rm -rf / & | ` $ > <")
+        assert ";" not in cleaned
+        assert "&" not in cleaned
+        assert "|" not in cleaned
+        assert "`" not in cleaned
+        assert "$" not in cleaned
+        assert ">" not in cleaned
+        assert "<" not in cleaned
 
     def test_resolve_custom_and_aliases(self):
         target, friendly = resolve_app_target("reproductor de musica")
@@ -315,6 +361,19 @@ class TestSystemTools:
         assert ok is True
         assert "CPU" in msg
 
+    @patch("bridge.pc_ops.get_battery_status")
+    def test_get_pc_battery_execution(self, mock_battery):
+        mock_battery.return_value = {
+            "present": True,
+            "percent": 85,
+            "charging": False,
+            "status": "Discharging",
+        }
+        ok, msg = execute_tool("get_pc_battery", {})
+        assert ok is True
+        assert "85%" in msg
+        assert "no esta cargando" in msg
+
 
 class TestExtendedTools:
     """Verifica enrutamiento y ejecucion de herramientas extendidas."""
@@ -412,6 +471,55 @@ class TestExtendedTools:
         ok, msg = execute_tool("get_current_time", {"mode": "date"})
         assert ok is True
         assert "Hoy es" in msg
+
+    @patch("jota.tools.media.subprocess.run")
+    def test_get_now_playing_execution(self, mock_sub_run):
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_res.stdout = "Song Title - Artist Name\n"
+        mock_sub_run.return_value = mock_res
+
+        ok, msg = execute_tool("get_now_playing", {})
+        assert ok is True
+        assert "Song Title - Artist Name" in msg
+
+    def test_cancel_timer_tool(self):
+        ok, msg = execute_tool("cancel_timer", {})
+        assert ok is True
+        assert "temporizador" in msg.lower()
+
+    def test_notes_search_tool(self, tmp_path, monkeypatch):
+        test_file = tmp_path / "notes.md"
+        monkeypatch.setattr("jota.tools.notes.NOTES_FILE", test_file)
+
+        execute_tool("manage_notes", {"action": "add", "text": "comprar cafe colombiano"})
+        execute_tool("manage_notes", {"action": "add", "text": "reparar la bicicleta"})
+
+        ok, msg = execute_tool("manage_notes", {"action": "search", "query": "cafe"})
+        assert ok is True
+        assert "comprar cafe colombiano" in msg
+        assert "bicicleta" not in msg
+
+    @patch("jota.tools.screen_vision.query_vision_model")
+    @patch("jota.tools.screen_vision.capture_screen_png_bytes")
+    def test_analyze_screen_execution(self, mock_capture, mock_query):
+        mock_capture.return_value = b"\x89PNG\r\n\x1a\nfakeimagebytes"
+        mock_query.return_value = (True, "En la terminal se observa un error de sintaxis en la linea 45.")
+
+        ok, msg = execute_tool("analyze_screen", {"question": "que error da la terminal"})
+        assert ok is True
+        assert "error de sintaxis" in msg
+
+    def test_analyze_screen_fast_intent(self):
+        intent = match_fast_intent("que error me esta dando la terminal")
+        assert intent is not None
+        assert intent[0] == "analyze_screen"
+
+        intent2 = match_fast_intent("explica que hay en la pantalla")
+        assert intent2 is not None
+        assert intent2[0] == "analyze_screen"
+
+
 
 
 

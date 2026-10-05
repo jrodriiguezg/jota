@@ -52,6 +52,31 @@ def list_notes(limit: int = 5) -> tuple[bool, str]:
         return False, f"Error al leer las notas: {e}"
 
 
+def search_notes(query: str) -> tuple[bool, str]:
+    """Busca notas que contengan el texto indicado."""
+    clean_q = query.lower().strip()
+    if not clean_q:
+        return False, "Indica que palabra deseas buscar en tus notas."
+
+    file = _ensure_notes_file()
+    try:
+        content = file.read_text(encoding="utf-8").splitlines()
+        matches = [
+            line.strip()[2:]
+            for line in content
+            if line.strip().startswith("- [") and clean_q in line.lower()
+        ]
+        if not matches:
+            return True, f"No encontre ninguna nota que contenga '{query}'."
+
+        res = "; ".join(matches[-3:])
+        cant = f"Encontre {len(matches)} nota{'s' if len(matches) > 1 else ''}"
+        return True, f"{cant}: {res}."
+    except Exception as e:
+        logger.error("Error buscando en notas: %s", e)
+        return False, f"Error al buscar en notas: {e}"
+
+
 def clear_notes() -> tuple[bool, str]:
     """Limpia el archivo de notas."""
     file = _ensure_notes_file()
@@ -61,3 +86,4 @@ def clear_notes() -> tuple[bool, str]:
     except Exception as e:
         logger.error("Error borrando notas: %s", e)
         return False, f"Error al borrar las notas: {e}"
+

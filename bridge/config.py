@@ -38,7 +38,32 @@ FORBIDDEN_PATH_PARTS: list[str] = [
     "private_key",
     "/etc/shadow",
     "/etc/sudoers",
+    ".bash_history",
+    ".zsh_history",
+    ".bashrc",
+    ".zshrc",
+    ".netrc",
+    ".git-credentials",
+    ".aws",
+    ".docker",
+    "credentials.json",
+    ".config/gh",
 ]
 
-# Tamano maximo de descarga de archivo permitido (100 MB)
+# Tamano maximo de descarga y subida de archivos permitido (100 MB)
 MAX_FILE_DOWNLOAD_BYTES: int = 100 * 1024 * 1024
+MAX_FILE_UPLOAD_BYTES: int = 100 * 1024 * 1024
+
+# Tiempo de vida de audios temporales en cache antes de eliminacion automatica (15 minutos)
+AUDIO_CACHE_TTL_SECONDS: int = 900
+
+# Parametros de proteccion contra fuerza bruta / rate limiting
+AUTH_RATE_LIMIT_MAX_FAILURES: int = 10
+AUTH_RATE_LIMIT_WINDOW_SECONDS: int = 60
+
+# Habilitar anuncio automatico mDNS / ZeroConf en la red local
+ENABLE_MDNS_DISCOVERY: bool = os.getenv("JOTA_BRIDGE_MDNS", "true").lower() in ("true", "1", "yes")
+
+# Auto-configurar redireccion inversa ADB para conexion por cable USB si hay dispositivo
+ENABLE_AUTO_ADB_REVERSE: bool = os.getenv("JOTA_BRIDGE_AUTO_ADB", "true").lower() in ("true", "1", "yes")
+

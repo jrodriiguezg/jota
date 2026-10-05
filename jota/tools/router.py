@@ -53,6 +53,15 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     ):
         return "screenshot", {}
 
+    # 1b. Vision y analisis de pantalla con VLM
+    if re.search(
+        r"^(que\s+error\s+(me\s+)?(esta\s+dando|da|sale\s+en)\s+(la\s+)?(terminal|consola|pantalla))"
+        r"|^(explica(me)?(\s+que\s+hay\s+en|\s+la)?|que\s+hay\s+en|que\s+tengo\s+en|mira|analiza)\s+(la\s+)?pantalla"
+        r"|^resume(\s+lo\s+que\s+estoy\s+leyendo|\s+la\s+pantalla)",
+        clean,
+    ):
+        return "analyze_screen", {"question": text}
+
     # 2. Control de volumen
     if re.search(
         r"^(sube|subir|aumenta|aumentar|mas|subeme)\s+(el\s+)?(volumen|sonido|audio)",
@@ -75,18 +84,25 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
 
     # 3. Control de reproduccion
     if re.search(
-        r"^(pausa|pausar|para|parar|deten|detener)"
-        r"(\s+(la\s+)?(musica|cancion|reproduccion|audio))?$",
+        r"^(pausa|pausar|para|parar|deten|detener|corta|cortar)"
+        r"(\s+(la\s+|el\s+)?(m[uú]sica|canci[oó]n|reproducci[oó]n|audio|pista|tema))?$",
         clean,
     ):
         return "media_control", {"action": "pause"}
 
     if re.search(
         r"^(reproduce|reproducir|reanuda|reanudar|continua|continuar|dale\s+al\s+play|play)"
-        r"(\s+(la\s+)?(musica|cancion|reproduccion))?$",
+        r"(\s+(la\s+|el\s+)?(reproducci[oó]n(\s+de(\s+la)?\s+(m[uú]sica|canci[oó]n|audio))?|m[uú]sica|canci[oó]n|tema|pista|audio))?$"
+        r"|^(inicia|iniciar|comienza|comenzar|empieza|empezar|pon|arranca|arrancar)"
+        r"\s+(la\s+|el\s+)?(reproducci[oó]n(\s+de(\s+la)?\s+(m[uú]sica|canci[oó]n|audio))?|m[uú]sica|canci[oó]n|tema|pista|audio)$"
+        r"|^inicia(\s+la)?\s+reproducci[oó]n"
+        r"|^dale\s+al\s+play$"
+        r"|^play$",
         clean,
     ):
         return "media_control", {"action": "play"}
+
+
 
     if re.search(
         r"^(siguiente|cambia(\s+de)?|pasa(\s+de)?|otra|pon\s+la\s+siguiente)"
@@ -129,6 +145,13 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         app_target = open_app_match.group(4).strip()
         return "open_app", {"name": app_target}
 
+    # 5b. Nombre directo de aplicacion o alias conocido (ej: 'reproductor de musica', 'feishin', 'terminal')
+    clean_app_cand = re.sub(r"^(el|la|los|las|un|una)\s+", "", clean).strip()
+    from jota.config import APP_ALIASES, CUSTOM_APP_MAPPINGS
+    if clean_app_cand in APP_ALIASES or clean_app_cand in CUSTOM_APP_MAPPINGS:
+        return "open_app", {"name": clean_app_cand}
+
+
     # 6. Hora y fecha del sistema
     if re.search(
         r"^(que\s+hora\s+es|dime\s+la\s+hora|hora(\s+actual)?|que\s+hora\s+tienes)$",
@@ -161,12 +184,24 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         return "switch_workspace", {"target": int(val)}
 
     ws_move = re.search(
-        r"^(mueve|mueved|mover|mueva)\s+(la\s+)?ventana\s+al\s+(escritorio|workspace)\s+(\d+)$",
+        r"^(mueve|mueved|mover|mueva)\s+"
+        r"(?:(la\s+)?(ventana|aplicaci[oó]n|app)\s+(de\s+)?)?"
+        r"(?:(el|la|los|las)\s+)?"
+        r"(.+?)?\s*"
+        r"al\s+(?:escritorio|workspace)\s+(\d+)$",
         clean,
     )
     if ws_move:
-        val = ws_move.group(4)
-        return "move_to_workspace", {"target": int(val)}
+        raw_app = (ws_move.group(6) or "").strip()
+        if raw_app in ("ventana", "aplicacion", "aplicación", "app", "la ventana", "la app", "el", "la"):
+            raw_app = ""
+        val = ws_move.group(7)
+        res_dict = {"target": int(val)}
+        if raw_app:
+            res_dict["app"] = raw_app
+        return "move_to_workspace", res_dict
+
+
 
     # 9. Clima y tiempo
     weather_match = re.search(
@@ -180,6 +215,38 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         ).strip()
         if cleaned_city:
             return "get_weather", {"city": cleaned_city.capitalize()}
+
+    # 10. Confirmacion y cancelacion de acciones de energia
+    if re.search(r"^(si\s*,?\s*confirma(r)?|confirmo|confirma|procede)$", clean):
+        return "system_power", {"action": "confirm"}
+    if re.search(r"^(cancela(r)?|no\s*,?\s*cancela(r)?|no\s+lo\s+hagas|abortar)$", clean):
+        return "system_power", {"action": "cancel"}
+
+    # 11. Bateria del PC
+    if re.search(
+        r"^(cuanta\s+bateria\s+le\s+queda(\s+al\s+(pc|portatil|ordenador))?|(nivel\s+de\s+|estado\s+de\s+)?bateria(\s+del\s+(pc|portatil|ordenador))?)$",
+        clean,
+    ):
+        return "get_pc_battery", {}
+
+    # 12. Cancion que esta sonando actualmente
+    if re.search(
+        r"^(que\s+(cancion|tema|pista)\s+(esta\s+sonando|suena)|que\s+cancion\s+es(\s+esta)?|que\s+suena|que\s+esta\s+sonando)$",
+        clean,
+    ):
+        return "get_now_playing", {}
+
+    # 13. Cancelacion de temporizadores
+    if re.search(
+        r"^(cancela|cancelar|para|parar|deten|detener)\s+(el\s+|la\s+)?(temporizador|alarma|aviso)$",
+        clean,
+    ):
+        return "cancel_timer", {}
+
+    # 14. Busqueda en notas
+    notes_search = re.search(r"^(busca|buscame|buscar)\s+en\s+(mis\s+)?notas\s+(.+)$", clean)
+    if notes_search:
+        return "manage_notes", {"action": "search", "query": notes_search.group(3).strip()}
 
     return None
 
@@ -338,11 +405,17 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
 
     if norm_name in ("movetoworkspace", "moveraescritorio", "movewindowworkspace"):
         raw_target = args.get("target") or args.get("workspace_id") or args.get("id", 1)
+        app = args.get("app") or args.get("name") or args.get("app_name", "")
         try:
             target = int(raw_target)
         except (ValueError, TypeError):
             target = 1
-        return "move_to_workspace", {"target": target}
+        res_dict = {"target": target}
+        if app:
+            res_dict["app"] = app
+        return "move_to_workspace", res_dict
+
+
 
     # 14. Clima y meteorologia
     if norm_name in ("getweather", "weather", "clima", "tiempo", "consultartiempo"):
@@ -378,6 +451,23 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         mode = args.get("mode", "time")
         return "get_current_time", {"mode": mode}
 
+    # 18. Bateria del PC
+    if norm_name in ("getpcbattery", "pcbattery", "bateriapc", "bateriaordenador", "battery"):
+        return "get_pc_battery", {}
+
+    # 19. Cancion que suena (Now playing)
+    if norm_name in ("getnowplaying", "nowplaying", "cancionactual", "musicaactual", "quesuena"):
+        return "get_now_playing", {}
+
+    # 20. Cancelar temporizadores
+    if norm_name in ("canceltimer", "stoptimer", "cancelartemporizador", "parartemporizador"):
+        return "cancel_timer", {}
+
+    # 21. Vision y analisis de pantalla
+    if norm_name in ("analyzescreen", "screenvision", "vision", "explainscreen", "analizarpantalla"):
+        question = args.get("question") or args.get("query", "Que hay en pantalla?")
+        return "analyze_screen", {"question": question}
+
     return None
 
 
@@ -400,6 +490,10 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
     if tool_name == "media_control":
         action = args.get("action", "play_pause")
         return playback_control(action)
+
+    if tool_name == "get_now_playing":
+        from jota.tools.media import get_now_playing
+        return get_now_playing()
 
     if tool_name == "open_app":
         name = args.get("name", "")
@@ -441,6 +535,10 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         from jota.tools.system import get_pc_summary
         return get_pc_summary()
 
+    if tool_name == "get_pc_battery":
+        from jota.tools.system import get_pc_battery
+        return get_pc_battery()
+
     if tool_name == "switch_workspace":
         from jota.tools.workspace import switch_workspace
         target = args.get("target", 1)
@@ -449,7 +547,9 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
     if tool_name == "move_to_workspace":
         from jota.tools.workspace import move_to_workspace
         target = args.get("target", 1)
-        return move_to_workspace(target)
+        app = args.get("app") or args.get("name") or args.get("app_name", "")
+        return move_to_workspace(target, app)
+
 
     if tool_name == "get_weather":
         from jota.tools.weather import get_weather
@@ -457,12 +557,14 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         return get_weather(city)
 
     if tool_name == "manage_notes":
-        from jota.tools.notes import add_note, clear_notes, list_notes
+        from jota.tools.notes import add_note, clear_notes, list_notes, search_notes
         action = args.get("action", "add")
         if action in ("list", "leer", "consultar"):
             return list_notes(limit=int(args.get("limit", 5)))
         if action in ("clear", "borrar"):
             return clear_notes()
+        if action in ("search", "buscar"):
+            return search_notes(args.get("query") or args.get("text", ""))
         return add_note(args.get("text", ""))
 
     if tool_name == "set_timer":
@@ -471,9 +573,19 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         label = args.get("label", "temporizador")
         return set_timer(seconds, label)
 
+    if tool_name == "cancel_timer":
+        from jota.tools.timer import cancel_timers
+        return cancel_timers()
+
     if tool_name == "get_current_time":
         from jota.tools.datetime_tool import get_current_time
         mode = args.get("mode", "time")
         return get_current_time(mode)
 
+    if tool_name == "analyze_screen":
+        from jota.tools.screen_vision import analyze_screen
+        question = args.get("question", "Que hay en pantalla?")
+        return analyze_screen(question)
+
     return False, f"Herramienta no implementada: {tool_name}"
+
