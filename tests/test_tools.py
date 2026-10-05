@@ -11,7 +11,6 @@ from jota.tools.router import (
 )
 from jota.tools.screenshot import take_screenshot_to_clipboard
 from jota.tools.search import clean_search_query, open_web_search
-import jota.tools.screen_vision
 
 
 class TestFastIntentRouter:
@@ -26,6 +25,23 @@ class TestFastIntentRouter:
         assert match_fast_intent("menos sonido") == ("volume_control", {"direction": "down"})
         assert match_fast_intent("silencia el audio") == ("volume_control", {"action": "mute"})
         assert match_fast_intent("mute") == ("volume_control", {"action": "mute"})
+        # Niveles especificos de volumen
+        assert match_fast_intent("sube el volumen al 50%") == (
+            "volume_control",
+            {"action": "set", "level": 50},
+        )
+        assert match_fast_intent("pon el volumen a 80") == (
+            "volume_control",
+            {"action": "set", "level": 80},
+        )
+        assert match_fast_intent("volumen al 70") == (
+            "volume_control",
+            {"action": "set", "level": 70},
+        )
+        assert match_fast_intent("baja el volumen a 20") == (
+            "volume_control",
+            {"action": "set", "level": 20},
+        )
 
     def test_media_intents(self):
         assert match_fast_intent("pausa la musica") == ("media_control", {"action": "pause"})
@@ -33,13 +49,25 @@ class TestFastIntentRouter:
         assert match_fast_intent("para la cancion") == ("media_control", {"action": "pause"})
         assert match_fast_intent("reproduce") == ("media_control", {"action": "play"})
         assert match_fast_intent("reanuda la musica") == ("media_control", {"action": "play"})
-        assert match_fast_intent("Inicia la reproducción de la música.") == ("media_control", {"action": "play"})
-        assert match_fast_intent("Inicia la reproducción.") == ("media_control", {"action": "play"})
+        assert match_fast_intent("Inicia la reproducción de la música.") == (
+            "media_control",
+            {"action": "play"},
+        )
+        assert match_fast_intent("Inicia la reproducción.") == (
+            "media_control",
+            {"action": "play"},
+        )
         assert match_fast_intent("inicia la musica") == ("media_control", {"action": "play"})
         assert match_fast_intent("pon musica") == ("media_control", {"action": "play"})
         assert match_fast_intent("siguiente cancion") == ("media_control", {"action": "next"})
+        assert match_fast_intent("Siguiente canción.") == ("media_control", {"action": "next"})
+        assert match_fast_intent("Reproduce la siguiente canción.") == (
+            "media_control",
+            {"action": "next"},
+        )
         assert match_fast_intent("cambia de cancion") == ("media_control", {"action": "next"})
         assert match_fast_intent("cancion anterior") == ("media_control", {"action": "previous"})
+        assert match_fast_intent("Canción anterior.") == ("media_control", {"action": "previous"})
 
 
     def test_screenshot_intents(self):
@@ -83,6 +111,14 @@ class TestFastIntentRouter:
         assert match_fast_intent("a ver a terminar") == ("open_app", {"name": "terminal"})
         assert match_fast_intent("a ver la terminal") == ("open_app", {"name": "terminal"})
         assert match_fast_intent("abre dolfin") == ("open_app", {"name": "dolphin"})
+        # Confusiones de volumen ("suelva/suelvo" por "sube")
+        assert match_fast_intent("Suelva el volumen.") == ("volume_control", {"direction": "up"})
+        assert match_fast_intent("¡Suelvo el volumen a 100!") == (
+            "volume_control",
+            {"action": "set", "level": 100},
+        )
+        assert match_fast_intent("suelba el volumen") == ("volume_control", {"direction": "up"})
+        assert match_fast_intent("bajame el volumen") == ("volume_control", {"direction": "down"})
 
     def test_datetime_intents(self):
         assert match_fast_intent("que hora es") == ("get_current_time", {"mode": "time"})
@@ -152,6 +188,12 @@ class TestLLMToolParser:
 
         out2 = "TOOL: volume_control(action='mute')"
         assert parse_llm_tool_call(out2) == ("volume_control", {"action": "mute"})
+
+        out_set = "TOOL: volume_control(action='set', level=100)"
+        assert parse_llm_tool_call(out_set) == ("volume_control", {"action": "set", "level": 100})
+
+        out_set2 = "TOOL: volume_control(level=80)"
+        assert parse_llm_tool_call(out_set2) == ("volume_control", {"action": "set", "level": 80})
 
         # Tolerar salida de Qwen sin guion bajo (volumecontrol)
         out3 = "TOOL: volumecontrol(action='up')"
@@ -248,6 +290,27 @@ class TestToolExecution:
         ok, msg = set_volume("up")
         assert ok is True
         assert "80%" in msg or "subido" in msg
+
+    @patch("jota.tools.media.shutil.which")
+    @patch("jota.tools.media._run_cmd")
+    def test_set_volume_level(self, mock_run, mock_which):
+        from jota.tools.media import set_volume_level
+        mock_which.return_value = "/usr/bin/wpctl"
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "Volume: 1.00"
+        mock_run.return_value = mock_proc
+
+        ok, msg = set_volume_level(100)
+        assert ok is True
+        assert "100%" in msg
+        mock_run.assert_any_call(
+            ["wpctl", "set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", "100%"]
+        )
+
+        # Probar via execute_tool
+        ok2, msg2 = execute_tool("volume_control", {"action": "set", "level": 50})
+        assert ok2 is True
 
     @patch("jota.tools.media.shutil.which")
     @patch("jota.tools.media._run_cmd")
@@ -504,7 +567,10 @@ class TestExtendedTools:
     @patch("jota.tools.screen_vision.capture_screen_png_bytes")
     def test_analyze_screen_execution(self, mock_capture, mock_query):
         mock_capture.return_value = b"\x89PNG\r\n\x1a\nfakeimagebytes"
-        mock_query.return_value = (True, "En la terminal se observa un error de sintaxis en la linea 45.")
+        mock_query.return_value = (
+            True,
+            "En la terminal se observa un error de sintaxis en la linea 45.",
+        )
 
         ok, msg = execute_tool("analyze_screen", {"question": "que error da la terminal"})
         assert ok is True

@@ -57,13 +57,13 @@ def test_clean_text_strips_tables_emojis_and_simplifies_urls():
         "| Fruta | Cantidad |\n"
         "|-------|----------|\n"
         "| Manzana | 5 |\n\n"
-        "Visita https://github.com/proyecto/repo para mas info. 🚀 ¡Genial! ✨"
+        "Visita https://github.com/proyecto/repo para mas info. \U0001F680 ¡Genial! \u2728"
     )
     cleaned = clean_text_for_tts(raw)
     assert "|" not in cleaned
     assert "---" not in cleaned
-    assert "🚀" not in cleaned
-    assert "✨" not in cleaned
+    assert "\U0001F680" not in cleaned
+    assert "\u2728" not in cleaned
     assert "enlace de github.com" in cleaned
     assert "Manzana" in cleaned
 
@@ -98,6 +98,7 @@ def test_conversation_memory_basic_and_trim():
 
 def test_conversation_memory_ttl_expiration(monkeypatch):
     import time
+
     from jota.llm import ConversationMemory
 
     mem = ConversationMemory(max_turns=2, ttl_seconds=1.0)
@@ -140,8 +141,9 @@ def test_check_prompt_safety():
 
 
 def test_ask_with_mocked_llm(monkeypatch):
-    import jota.llm as llm_module
     from unittest.mock import MagicMock
+
+    import jota.llm as llm_module
 
     mock_llm = MagicMock()
     mock_llm.create_chat_completion.return_value = {

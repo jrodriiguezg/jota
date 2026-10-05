@@ -149,8 +149,14 @@ def get_battery_status() -> dict[str, Any]:
 
 def get_media_status() -> dict[str, Any]:
     """Obtiene informacion detallada de la reproduccion multimedia actual (MPRIS)."""
+    empty_media = {
+        "player": "",
+        "title": "",
+        "artist": "",
+        "album": "",
+    }
     if not shutil.which("playerctl"):
-        return {"available": False, "status": "unavailable", "player": "", "title": "", "artist": "", "album": ""}
+        return {"available": False, "status": "unavailable", **empty_media}
 
     try:
         proc_status = subprocess.run(
@@ -161,7 +167,7 @@ def get_media_status() -> dict[str, Any]:
             check=False,
         )
         if proc_status.returncode != 0 or not proc_status.stdout.strip():
-            return {"available": True, "status": "Stopped", "player": "", "title": "", "artist": "", "album": ""}
+            return {"available": True, "status": "Stopped", **empty_media}
 
         status = proc_status.stdout.strip()
         format_str = "{{playerName}}\t{{title}}\t{{artist}}\t{{album}}"
@@ -195,7 +201,7 @@ def get_media_status() -> dict[str, Any]:
         }
     except Exception as e:
         logger.debug("Error al leer estado multimedia: %s", e)
-        return {"available": False, "status": "error", "player": "", "title": "", "artist": "", "album": ""}
+        return {"available": False, "status": "error", **empty_media}
 
 
 def get_system_status() -> dict[str, Any]:
@@ -499,6 +505,13 @@ def execute_pc_action(action: str) -> tuple[bool, str]:
         return set_volume("up")
     if clean_act in ("vol_down", "down", "volume_down"):
         return set_volume("down")
+    if clean_act.startswith("vol_set:") or clean_act.startswith("volume_set:"):
+        val_str = clean_act.split(":", 1)[1].strip()
+        try:
+            from jota.tools.media import set_volume_level
+            return set_volume_level(int(val_str))
+        except ValueError:
+            return False, f"Nivel de volumen invalido: {val_str}"
     if clean_act in ("play_pause", "toggle_playback"):
         return playback_control("play_pause")
     if clean_act in ("next", "next_track"):
@@ -538,10 +551,10 @@ def get_pc_network_info() -> dict[str, Any]:
             mac = ""
             state = "unknown"
             if os.path.isfile(addr_file):
-                with open(addr_file, "r") as f:
+                with open(addr_file) as f:
                     mac = f.read().strip()
             if os.path.isfile(state_file):
-                with open(state_file, "r") as f:
+                with open(state_file) as f:
                     state = f.read().strip()
 
             if mac and len(mac) == 17:
