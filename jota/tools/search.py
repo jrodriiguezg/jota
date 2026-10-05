@@ -3,7 +3,6 @@
 import logging
 import re
 import shutil
-import subprocess
 import urllib.parse
 
 from jota.config import BROWSER_BIN, WEB_SEARCH_URL
@@ -59,15 +58,12 @@ def open_web_search(raw_query: str) -> tuple[bool, str]:
         return False, err_msg
 
     try:
-        subprocess.Popen(
-            [browser, url],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        msg = f"Buscando en la web: {query}."
-        logger.info(msg)
-        return True, msg
+        from jota.tools.apps import spawn_detached
+        if spawn_detached([browser, url]):
+            msg = f"Buscando en la web: {query}."
+            logger.info(msg)
+            return True, msg
+        return False, "No se pudo iniciar el navegador web."
     except Exception as exc:
         logger.exception("Error al abrir navegador para busqueda: %s", exc)
         return False, "Ocurrio un fallo al abrir la busqueda en la web."

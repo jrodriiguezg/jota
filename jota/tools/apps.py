@@ -86,6 +86,78 @@ def resolve_app_target(raw_target: str) -> tuple[str, str]:
     return resolved, friendly
 
 
+def spawn_detached(cmd: list[str]) -> bool:
+    """
+    Ejecuta un comando totalmente desacoplado del ciclo de vida de Jota.
+    Garantiza que la aplicacion permanezca abierta aunque Jota se cierre o reciba SIGINT.
+    Prioridades:
+    1. hyprctl dispatch hl.dsp.exec_cmd(...) (Hyprland 0.56+)
+    2. hyprctl dispatch exec ... (Hyprland clasico)
+    3. systemd-run --user --slice=app.slice ... (cgroup independiente de systemd)
+    4. subprocess.Popen(..., start_new_session=True) (sesion POSIX desacoplada)
+    """
+    import shlex
+
+    cmd_str = shlex.join(cmd)
+
+    # 1. Delegar ejecucion en el compositor Wayland Hyprland
+    hyprctl = shutil.which("hyprctl")
+    if hyprctl:
+        try:
+            safe_str = cmd_str.replace("\\", "\\\\").replace("'", "\\'")
+            res_lua = subprocess.run(
+                [hyprctl, "dispatch", f"hl.dsp.exec_cmd('{safe_str}')"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if res_lua.returncode == 0 and "error" not in res_lua.stderr.lower():
+                return True
+
+            res_fb = subprocess.run(
+                [hyprctl, "dispatch", "exec", cmd_str],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if res_fb.returncode == 0 and "error" not in res_fb.stderr.lower():
+                return True
+        except Exception as e:
+            logger.debug("hyprctl dispatch exec no disponible: %s", e)
+
+    # 2. Delegar en systemd user slice
+    systemd_run = shutil.which("systemd-run")
+    if systemd_run:
+        try:
+            res_sd = subprocess.run(
+                [systemd_run, "--user", "--slice=app.slice", "--no-block", *cmd],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=3,
+            )
+            if res_sd.returncode == 0:
+                return True
+        except Exception as e:
+            logger.debug("systemd-run fallo: %s", e)
+
+    # 3. Fallback directo con setsid / start_new_session
+    try:
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return True
+    except Exception as e:
+        logger.error("Error al lanzar proceso desacoplado: %s", e)
+        return False
+
+
 def launch_application(target: str) -> tuple[bool, str]:
     """
     Lanza una aplicacion en segundo plano en el entorno de escritorio Wayland.
@@ -96,71 +168,33 @@ def launch_application(target: str) -> tuple[bool, str]:
 
     desktop_id = resolved[:-8] if resolved.endswith(".desktop") else resolved
 
-    # 1. Intentar con gtk-launch (soporta aplicaciones .desktop del sistema y Flatpak)
+    # 1. Intentar con gtk-launch desacoplado (soporta aplicaciones .desktop del sistema y Flatpak)
     if shutil.which("gtk-launch"):
-        try:
-            # Probar con el nombre sin extension y con extension
-            proc = subprocess.run(
-                ["gtk-launch", desktop_id],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=3,
-            )
-            if proc.returncode == 0:
-                msg = f"Abriendo {friendly_name}."
-                logger.info(msg)
-                return True, msg
-        except Exception as exc:
-            logger.debug("gtk-launch fallo para %s: %s", desktop_id, exc)
-
-    # 2. Si parece un Flatpak ID o existe en flatpak
-    if resolved.startswith("org.") and shutil.which("flatpak"):
-        try:
-            subprocess.Popen(
-                ["flatpak", "run", desktop_id],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
+        if spawn_detached(["gtk-launch", desktop_id]):
             msg = f"Abriendo {friendly_name}."
             logger.info(msg)
             return True, msg
-        except Exception as exc:
-            logger.debug("flatpak run fallo para %s: %s", desktop_id, exc)
+
+    # 2. Si parece un Flatpak ID o existe en flatpak
+    if resolved.startswith("org.") and shutil.which("flatpak"):
+        if spawn_detached(["flatpak", "run", desktop_id]):
+            msg = f"Abriendo {friendly_name}."
+            logger.info(msg)
+            return True, msg
 
     # 3. Intentar como binario en PATH
     binary_path = shutil.which(desktop_id) or shutil.which(resolved)
     if binary_path:
-        try:
-            subprocess.Popen(
-                [binary_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
+        if spawn_detached([binary_path]):
             msg = f"Abriendo {friendly_name}."
             logger.info(msg)
             return True, msg
-        except Exception as exc:
-            logger.error("Error al ejecutar binario %s: %s", binary_path, exc)
 
     # 4. Fallback con gio launch si esta disponible
     if shutil.which("gio"):
-        try:
-            # Buscar el archivo desktop en rutas estandar
-            res = subprocess.run(
-                ["gio", "launch", f"{desktop_id}.desktop"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=3,
-            )
-            if res.returncode == 0:
-                msg = f"Abriendo {friendly_name}."
-                return True, msg
-        except Exception:
-            pass
+        if spawn_detached(["gio", "launch", f"{desktop_id}.desktop"]):
+            msg = f"Abriendo {friendly_name}."
+            return True, msg
 
     err_msg = f"No pude encontrar ni abrir la aplicacion {friendly_name}."
     logger.warning(err_msg)

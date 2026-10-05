@@ -522,8 +522,10 @@ def execute_pc_action(action: str) -> tuple[bool, str]:
     if clean_act.startswith("open_url:"):
         url = action.split(":", 1)[1].strip()
         try:
-            subprocess.Popen(["xdg-open", url])
-            return True, f"Abriendo enlace en el navegador: {url}"
+            from jota.tools.apps import spawn_detached
+            if spawn_detached(["xdg-open", url]):
+                return True, f"Abriendo enlace en el navegador: {url}"
+            return False, "No se pudo lanzar el navegador web."
         except Exception as e:
             return False, f"Error al abrir URL: {e}"
 

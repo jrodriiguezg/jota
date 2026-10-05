@@ -482,16 +482,40 @@ class TestToolExecution:
         assert "Dolphin" in msg
 
     @patch("jota.tools.search.shutil.which")
-    @patch("jota.tools.search.subprocess.Popen")
-    def test_open_web_search(self, mock_popen, mock_which):
+    @patch("jota.tools.apps.spawn_detached")
+    def test_open_web_search(self, mock_spawn, mock_which):
         mock_which.return_value = "/usr/bin/firefox"
+        mock_spawn.return_value = True
         ok, msg = open_web_search("que es una vaca")
         assert ok is True
         assert "que es una vaca" in msg
-        mock_popen.assert_called_once()
-        args = mock_popen.call_args[0][0]
+        mock_spawn.assert_called_once()
+        args = mock_spawn.call_args[0][0]
         assert "firefox" in args[0]
         assert "google.com/search?q=" in args[1]
+
+    @patch("jota.tools.apps.subprocess.run")
+    @patch("jota.tools.apps.shutil.which")
+    def test_spawn_detached_hyprland(self, mock_which, mock_run):
+        from jota.tools.apps import spawn_detached
+
+        mock_which.side_effect = lambda b: f"/usr/bin/{b}" if b == "hyprctl" else None
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        assert spawn_detached(["dolphin"]) is True
+
+    @patch("jota.tools.apps.subprocess.Popen")
+    @patch("jota.tools.apps.shutil.which")
+    def test_spawn_detached_fallback_popen(self, mock_which, mock_popen):
+        from jota.tools.apps import spawn_detached
+
+        mock_which.return_value = None
+        assert spawn_detached(["dolphin"]) is True
+        mock_popen.assert_called_once()
+        assert mock_popen.call_args[1].get("start_new_session") is True
 
 
 class TestSystemTools:
@@ -791,6 +815,7 @@ class TestWindowAndDisplayTools:
     @patch("jota.tools.workspace.shutil.which")
     def test_focus_app_found(self, mock_which, mock_run):
         import json
+
         from jota.tools.workspace import focus_app
 
         mock_which.return_value = "/usr/bin/hyprctl"
@@ -815,6 +840,7 @@ class TestWindowAndDisplayTools:
     @patch("jota.tools.workspace.shutil.which")
     def test_focus_app_not_found(self, mock_which, mock_run):
         import json
+
         from jota.tools.workspace import focus_app
 
         mock_which.return_value = "/usr/bin/hyprctl"
