@@ -285,3 +285,120 @@ def focus_app(name: str) -> tuple[bool, str]:
         return False, f"Error al enfocar ventana: {e}"
 
 
+def close_window(app_name: str = "") -> tuple[bool, str]:
+    """
+    Cierra una aplicacion especifica abierta o la ventana activa en Hyprland.
+    app_name: nombre o alias de la app (ej: 'firefox', 'telegram', 'dolphin', 'musica').
+              Si esta vacio, es 'activa' o 'esta', cierra la ventana activa en foco.
+    """
+    import json
+
+    from jota.tools.apps import resolve_app_target
+
+    hyprctl = shutil.which("hyprctl")
+    if not hyprctl:
+        return False, "hyprctl no esta disponible en este entorno."
+
+    clean_app = str(app_name).strip()
+    is_active = not clean_app or clean_app.lower() in (
+        "activa", "actual", "esta", "esta ventana", "la ventana", "esta_ventana"
+    )
+
+    # 1. Caso: Cerrar ventana activa en foco
+    if is_active:
+        try:
+            # Hyprland 0.56+ (sintaxis Lua)
+            res = subprocess.run(
+                [hyprctl, "dispatch", "hl.dsp.window.close()"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if res.returncode == 0 and "error" not in res.stderr.lower():
+                return True, "Ventana cerrada."
+
+            # Fallback clasico
+            res_fb = subprocess.run(
+                [hyprctl, "dispatch", "killactive"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if res_fb.returncode == 0 and "error" not in res_fb.stderr.lower():
+                return True, "Ventana cerrada."
+
+            return False, "No se pudo cerrar la ventana activa."
+        except Exception as e:
+            logger.error("Error cerrando ventana activa: %s", e)
+            return False, f"Error al cerrar ventana: {e}"
+
+    # 2. Caso: Cerrar aplicacion especifica por nombre
+    resolved_app, friendly_name = resolve_app_target(clean_app)
+    search_terms = {
+        clean_app.lower(),
+        friendly_name.lower(),
+        resolved_app.lower(),
+    }
+    if resolved_app.startswith("org."):
+        search_terms.add(resolved_app.split(".")[-1].lower())
+
+    try:
+        clients_proc = subprocess.run(
+            [hyprctl, "clients", "-j"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if clients_proc.returncode != 0 or not clients_proc.stdout.strip():
+            return False, "No se pudo obtener la lista de ventanas abiertas."
+
+        clients = json.loads(clients_proc.stdout)
+        target_client = None
+
+        for client in clients:
+            c_class = (client.get("class") or "").lower()
+            c_init = (client.get("initialClass") or "").lower()
+            c_title = (client.get("title") or "").lower()
+            for term in search_terms:
+                if term and (term in c_class or term in c_init or term in c_title):
+                    target_client = client
+                    break
+            if target_client:
+                break
+
+        if not target_client:
+            return False, f"No hay ninguna ventana abierta de {friendly_name or clean_app}."
+
+        addr = target_client.get("address", "")
+
+        # Cerrar ventana por direccion en Hyprland 0.56+
+        res = subprocess.run(
+            [hyprctl, "dispatch", f"hl.dsp.window.close({{ window = 'address:{addr}' }})"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if res.returncode == 0 and "error" not in res.stderr.lower():
+            return True, f"Ventana de {friendly_name or clean_app} cerrada."
+
+        # Fallback clasico
+        res_fb = subprocess.run(
+            [hyprctl, "dispatch", "closewindow", f"address:{addr}"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if res_fb.returncode == 0 and "error" not in res_fb.stderr.lower():
+            return True, f"Ventana de {friendly_name or clean_app} cerrada."
+
+        return False, f"No se pudo cerrar la ventana de {friendly_name or clean_app}."
+    except Exception as e:
+        logger.error("Error al cerrar ventana de %s: %s", clean_app, e)
+        return False, f"Error al cerrar ventana: {e}"
+
+

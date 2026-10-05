@@ -118,20 +118,10 @@ def system_power(action: str, confirmed: bool = False) -> tuple[bool, str]:
 
 def close_active_window() -> tuple[bool, str]:
     """Cierra la ventana activa en Hyprland."""
-    logger.info("Cerrando ventana activa en Hyprland...")
-    try:
-        res = subprocess.run(
-            ["hyprctl", "dispatch", "killactive"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-        if res.returncode == 0:
-            return True, "Ventana cerrada."
-        return False, "No se pudo cerrar la ventana."
-    except Exception as e:
-        return False, f"Error con hyprctl: {e}"
+    from jota.tools.workspace import close_window
+
+    return close_window("")
+
 
 
 def send_desktop_notification(title: str, message: str) -> tuple[bool, str]:
