@@ -134,3 +134,154 @@ def move_to_workspace(workspace_id: int | str, app_name: str = "") -> tuple[bool
         logger.error("Error al mover ventana a workspace: %s", e)
         return False, f"Error al mover ventana: {e}"
 
+
+def window_action(action: str) -> tuple[bool, str]:
+    """
+    Manipula la ventana activa en Hyprland:
+    action: 'fullscreen' | 'float' | 'pin' | 'center'
+    """
+    hyprctl = shutil.which("hyprctl")
+    if not hyprctl:
+        return False, "hyprctl no esta disponible en este entorno."
+
+    clean_act = str(action).lower().strip()
+
+    fs = ("hl.dsp.window.fullscreen()", "fullscreen 0", "Ventana en pantalla completa.")
+    fl = ("hl.dsp.window.float()", "togglefloating", "Cambiado modo de ventana flotante.")
+    pn = ("hl.dsp.window.pin()", "pin", "Ventana fijada en todos los escritorios.")
+    ct = ("hl.dsp.window.center()", "centerwindow", "Ventana centrada en pantalla.")
+
+    dispatch_map = {
+        "fullscreen": fs,
+        "pantallacompleta": fs,
+        "maximizar": fs,
+        "float": fl,
+        "flotante": fl,
+        "togglefloating": fl,
+        "mosaico": fl,
+        "pin": pn,
+        "fijar": pn,
+        "anclar": pn,
+        "center": ct,
+        "centrar": ct,
+        "centerwindow": ct,
+    }
+
+    if clean_act not in dispatch_map:
+        return False, f"Accion de ventana no reconocida: '{action}'."
+
+    lua_cmd, fallback_cmd, success_msg = dispatch_map[clean_act]
+
+    try:
+        # Hyprland 0.56+ con sintaxis Lua
+        res = subprocess.run(
+            [hyprctl, "dispatch", lua_cmd],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if res.returncode == 0 and "error" not in res.stderr.lower():
+            return True, success_msg
+
+        # Fallback clasico
+        res_fb = subprocess.run(
+            [hyprctl, "dispatch", *fallback_cmd.split()],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if res_fb.returncode == 0 and "error" not in res_fb.stderr.lower():
+            return True, success_msg
+
+        err = res.stderr.strip() or res_fb.stderr.strip() or "Error al ejecutar accion de ventana."
+        return False, f"Fallo al aplicar accion en la ventana: {err}"
+    except Exception as e:
+        logger.error("Error en window_action (%s): %s", action, e)
+        return False, f"Error al manipular la ventana: {e}"
+
+
+def focus_app(name: str) -> tuple[bool, str]:
+    """
+    Enfoca directamente la ventana de una aplicacion abierta en cualquier workspace.
+    name: nombre o alias de la app (ej: 'telegram', 'firefox', 'dolphin', 'musica', 'terminal')
+    """
+    import json
+
+    from jota.tools.apps import resolve_app_target
+
+    hyprctl = shutil.which("hyprctl")
+    if not hyprctl:
+        return False, "hyprctl no esta disponible en este entorno."
+
+    clean_name = str(name).strip()
+    if not clean_name:
+        return False, "No se indico ninguna aplicacion para enfocar."
+
+    resolved_app, friendly_name = resolve_app_target(clean_name)
+    search_terms = {
+        clean_name.lower(),
+        friendly_name.lower(),
+        resolved_app.lower(),
+    }
+    if resolved_app.startswith("org."):
+        search_terms.add(resolved_app.split(".")[-1].lower())
+
+    try:
+        clients_proc = subprocess.run(
+            [hyprctl, "clients", "-j"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if clients_proc.returncode != 0 or not clients_proc.stdout.strip():
+            return False, "No se pudo obtener la lista de ventanas abiertas."
+
+        clients = json.loads(clients_proc.stdout)
+        target_client = None
+
+        for client in clients:
+            c_class = (client.get("class") or "").lower()
+            c_init = (client.get("initialClass") or "").lower()
+            c_title = (client.get("title") or "").lower()
+            for term in search_terms:
+                if term and (term in c_class or term in c_init or term in c_title):
+                    target_client = client
+                    break
+            if target_client:
+                break
+
+        if not target_client:
+            return False, f"No hay ninguna ventana abierta de {friendly_name or clean_name}."
+
+        addr = target_client.get("address", "")
+        ws_info = target_client.get("workspace", {})
+        ws_name = ws_info.get("name") or str(ws_info.get("id", "actual"))
+
+        # Enfocar ventana en Hyprland 0.56+
+        res = subprocess.run(
+            [hyprctl, "dispatch", f"hl.dsp.focus({{ window = 'address:{addr}' }})"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if res.returncode == 0 and "error" not in res.stderr.lower():
+            return True, f"Enfocando {friendly_name or clean_name} en el espacio {ws_name}."
+
+        # Fallback clasico
+        subprocess.run(
+            [hyprctl, "dispatch", "focuswindow", f"address:{addr}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return True, f"Enfocando {friendly_name or clean_name} en el espacio {ws_name}."
+    except Exception as e:
+        logger.error("Error al enfocar aplicacion %s: %s", name, e)
+        return False, f"Error al enfocar ventana: {e}"
+
+

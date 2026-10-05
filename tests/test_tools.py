@@ -203,6 +203,63 @@ class TestFastIntentRouter:
             {"name": "kernel", "check": "version"},
         )
 
+    def test_window_and_display_fast_intents(self):
+        assert match_fast_intent("pon esta ventana en pantalla completa") == (
+            "window_action",
+            {"action": "fullscreen"},
+        )
+        assert match_fast_intent("haz flotante esta ventana") == (
+            "window_action",
+            {"action": "float"},
+        )
+        assert match_fast_intent("fija esta ventana en todos los escritorios") == (
+            "window_action",
+            {"action": "pin"},
+        )
+        assert match_fast_intent("centra esta ventana") == (
+            "window_action",
+            {"action": "center"},
+        )
+
+        assert match_fast_intent("pasa a telegram") == (
+            "focus_app",
+            {"name": "telegram"},
+        )
+        assert match_fast_intent("enfoca el navegador") == (
+            "focus_app",
+            {"name": "navegador"},
+        )
+
+        assert match_fast_intent("pon el brillo de la pantalla al 40%") == (
+            "brightness_control",
+            {"percent": 40, "action": "set"},
+        )
+        assert match_fast_intent("sube el brillo") == (
+            "brightness_control",
+            {"action": "up"},
+        )
+        assert match_fast_intent("baja el brillo") == (
+            "brightness_control",
+            {"action": "down"},
+        )
+        assert match_fast_intent("que brillo tengo") == (
+            "brightness_control",
+            {"action": "get"},
+        )
+
+        assert match_fast_intent("activa el filtro de luz azul") == (
+            "night_mode_control",
+            {"action": "on"},
+        )
+        assert match_fast_intent("desactiva el modo noche") == (
+            "night_mode_control",
+            {"action": "off"},
+        )
+        assert match_fast_intent("alterna el filtro de luz azul") == (
+            "night_mode_control",
+            {"action": "toggle"},
+        )
+
     def test_non_tool_intent_returns_none(self):
         assert match_fast_intent("como estas hoy") is None
         assert match_fast_intent("cual es la capital de Francia") is None
@@ -283,6 +340,22 @@ class TestLLMToolParser:
             "check_package",
             {"name": "java", "check": "installed"},
         )
+
+    def test_parse_window_and_display(self):
+        out = "TOOL: window_action(action='fullscreen')\nVentana maximizada."
+        assert parse_llm_tool_call(out) == ("window_action", {"action": "fullscreen"})
+
+        out2 = "TOOL: focus_app(name='telegram')\nEnfocando Telegram."
+        assert parse_llm_tool_call(out2) == ("focus_app", {"name": "telegram"})
+
+        out3 = "TOOL: brightness_control(percent=40, action='set')"
+        assert parse_llm_tool_call(out3) == (
+            "brightness_control",
+            {"percent": 40, "action": "set"},
+        )
+
+        out4 = "TOOL: night_mode_control(action='on')"
+        assert parse_llm_tool_call(out4) == ("night_mode_control", {"action": "on"})
 
     def test_parse_no_tool(self):
         assert parse_llm_tool_call("Hola, soy Jota en que puedo ayudarte?") is None
@@ -687,6 +760,115 @@ class TestPackageTools:
         ok, msg = execute_tool("check_package", {"name": "python", "check": "version"})
         assert ok is True
         assert "python" in msg.lower()
+
+
+class TestWindowAndDisplayTools:
+    """Pruebas unitarias para manipulacion de ventanas, enfoque de apps y pantalla."""
+
+    @patch("jota.tools.workspace.subprocess.run")
+    @patch("jota.tools.workspace.shutil.which")
+    def test_window_action_fullscreen(self, mock_which, mock_run):
+        from jota.tools.workspace import window_action
+
+        mock_which.return_value = "/usr/bin/hyprctl"
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        ok, msg = window_action("fullscreen")
+        assert ok is True
+        assert "pantalla completa" in msg
+
+    def test_window_action_invalid(self):
+        from jota.tools.workspace import window_action
+
+        ok, msg = window_action("accion_invalida_xyz")
+        assert ok is False
+        assert "no reconocida" in msg
+
+    @patch("jota.tools.workspace.subprocess.run")
+    @patch("jota.tools.workspace.shutil.which")
+    def test_focus_app_found(self, mock_which, mock_run):
+        import json
+        from jota.tools.workspace import focus_app
+
+        mock_which.return_value = "/usr/bin/hyprctl"
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = json.dumps([
+            {
+                "address": "0x123abc",
+                "class": "org.telegram.desktop",
+                "title": "Telegram",
+                "workspace": {"id": 3, "name": "3"},
+            }
+        ])
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        ok, msg = focus_app("telegram")
+        assert ok is True
+        assert "espacio 3" in msg
+
+    @patch("jota.tools.workspace.subprocess.run")
+    @patch("jota.tools.workspace.shutil.which")
+    def test_focus_app_not_found(self, mock_which, mock_run):
+        import json
+        from jota.tools.workspace import focus_app
+
+        mock_which.return_value = "/usr/bin/hyprctl"
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = json.dumps([])
+        mock_run.return_value = mock_proc
+
+        ok, msg = focus_app("discord")
+        assert ok is False
+        assert "no hay ninguna ventana abierta" in msg.lower()
+
+    @patch("jota.tools.display.subprocess.run")
+    @patch("jota.tools.display.shutil.which")
+    def test_brightness_control_set(self, mock_which, mock_run):
+        from jota.tools.display import brightness_control
+
+        mock_which.return_value = "/usr/bin/brightnessctl"
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "device,backlight,100,50%,200\n"
+        mock_run.return_value = mock_proc
+
+        ok, msg = brightness_control(percent=50, action="set")
+        assert ok is True
+        assert "50%" in msg
+
+    @patch("jota.tools.display.subprocess.run")
+    @patch("jota.tools.display.shutil.which")
+    def test_night_mode_control_off(self, mock_which, mock_run):
+        from jota.tools.display import night_mode_control
+
+        mock_which.return_value = "/usr/bin/wlsunset"
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0  # proceso activo
+        mock_run.return_value = mock_proc
+
+        ok, msg = night_mode_control(action="off")
+        assert ok is True
+        assert "desactivado" in msg
+
+    def test_execute_tool_window_and_display(self):
+        with patch("jota.tools.workspace.window_action") as mock_wa:
+            mock_wa.return_value = (True, "Ventana en pantalla completa.")
+            ok, msg = execute_tool("window_action", {"action": "fullscreen"})
+            assert ok is True
+            assert "pantalla completa" in msg
+
+        with patch("jota.tools.display.brightness_control") as mock_bc:
+            mock_bc.return_value = (True, "Brillo de la pantalla ajustado al 40%.")
+            ok, msg = execute_tool("brightness_control", {"percent": 40, "action": "set"})
+            assert ok is True
+            assert "40%" in msg
+
 
 
 

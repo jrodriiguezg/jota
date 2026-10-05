@@ -534,6 +534,28 @@ def execute_pc_action(action: str) -> tuple[bool, str]:
         from jota.tools.packages import check_package
         return check_package(pkg_name, check=check_type)
 
+    if clean_act.startswith("window_action:") or clean_act.startswith("window:"):
+        win_action = action.split(":", 1)[1].strip()
+        from jota.tools.workspace import window_action
+        return window_action(win_action)
+
+    if clean_act.startswith("focus_app:") or clean_act.startswith("focus:"):
+        target_app = action.split(":", 1)[1].strip()
+        from jota.tools.workspace import focus_app
+        return focus_app(target_app)
+
+    if clean_act.startswith("brightness:"):
+        br_arg = action.split(":", 1)[1].strip()
+        from jota.tools.display import brightness_control
+        if br_arg in ("up", "down", "get"):
+            return brightness_control(action=br_arg)
+        return brightness_control(percent=br_arg, action="set")
+
+    if clean_act.startswith("night_mode:"):
+        nm_arg = action.split(":", 1)[1].strip() or "toggle"
+        from jota.tools.display import night_mode_control
+        return night_mode_control(action=nm_arg)
+
     return False, f"Accion no reconocida: {action}"
 
 
