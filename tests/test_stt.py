@@ -1,4 +1,4 @@
-"""Tests basicos de Fase 1."""
+from unittest.mock import patch
 
 from jota.stt import extract_wake_word, strip_wake_word
 
@@ -83,5 +83,17 @@ class TestExtractWakeWord:
         has_wake, cmd = extract_wake_word("   ")
         assert has_wake is False
         assert cmd == ""
+
+    @patch("subprocess.run")
+    def test_transcribe_filters_silence_brackets(self, mock_run, tmp_path):
+        from jota import stt
+
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "[SILENCIO]"
+        fake_wav = tmp_path / "test.wav"
+        fake_wav.write_bytes(b"RIFFdata")
+
+        result = stt.transcribe(fake_wav)
+        assert result is None
 
 

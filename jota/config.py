@@ -91,8 +91,8 @@ WAKE_WORDS = ["jota", "hota", "j"]  # Whisper transcribe frecuentemente 'J' a se
 # La wake word se reserva para activacion manos libres (sin teclas).
 REQUIRE_WAKE_WORD = False
 
-# Escucha continua en segundo plano sin pulsar teclas
-HANDSFREE_ENABLED = os.getenv("JOTA_HANDSFREE", "true").lower() in ("true", "1", "yes")
+# Escucha continua en segundo plano (desactivada por defecto para push-to-talk)
+HANDSFREE_ENABLED = os.getenv("JOTA_HANDSFREE", "false").lower() in ("true", "1", "yes")
 # Umbral RMS de deteccion de voz (VAD) para microfono
 VAD_THRESHOLD = float(os.getenv("JOTA_VAD_THRESHOLD", "0.015"))
 # Segundos de silencio para delimitar el fin de una frase hablada
