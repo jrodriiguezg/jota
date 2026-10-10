@@ -141,6 +141,20 @@ NAVIDROME_USER = os.getenv("NAVIDROME_USER", "admin")
 NAVIDROME_SALT = os.getenv("NAVIDROME_SALT", "998e36")
 NAVIDROME_TOKEN = os.getenv("NAVIDROME_TOKEN", "b8df572fe408e8abbebc19311f6fc99c")
 
+# Rutas de escenas y rutinas
+SCENES_FILE = Path.home() / ".config" / "jota" / "scenes.yaml"
+
+# Alias y catalogo de dispositivos multi-pantalla y multimedia
+DEVICES = {
+    "tele": {"name": "Android TV Salón", "type": "cast", "adb": "192.168.1.50:5555"},
+    "television": {"name": "Android TV Salón", "type": "cast", "adb": "192.168.1.50:5555"},
+    "tv": {"name": "Android TV Salón", "type": "cast", "adb": "192.168.1.50:5555"},
+    "salon": {"name": "Android TV Salón", "type": "cast", "adb": "192.168.1.50:5555"},
+    "tablet": {"name": "Tablet", "type": "vnc", "host": "192.168.1.180"},
+    "movil": {"name": "Teléfono", "type": "adb", "serial": "E6IBDMBEJBWCNZS8"},
+    "telefono": {"name": "Teléfono", "type": "adb", "serial": "E6IBDMBEJBWCNZS8"},
+}
+
 VOLUME_STEP_PERCENT = 5
 BROWSER_BIN = "firefox"
 WEB_SEARCH_URL = "https://www.google.com/search?q="
@@ -246,6 +260,17 @@ Catálogo estricto de herramientas disponibles:
 - phone_send_screenshot(workspace=N): Envia captura de pantalla o de un espacio al movil.
 - phone_send_url(url='...'): Envia la URL activa del navegador o copiada al movil.
 - phone_send_file(target='...'): Envia archivo seleccionado o indicado al movil.
+- trigger_scene(name='...'): Ejecuta escena o rutina ('modo_cine', 'modo_trabajo', 'buenas_noches').
+- list_scenes(): Consulta las escenas y rutinas configuradas en scenes.yaml.
+- cast_media(target='tele'|'salon'): Emite contenido, video o cancion actual a la tele.
+- cast_control(action='pause'|'resume'|'stop', target='tele'): Control de reproduccion en la tele.
+- launch_tv_app(name='...', target='tele'): Abre app en la tele ('netflix', 'prime', 'youtube').
+- cec_control(action='turn_on'|'turn_off'|'switch', target='tele'): Control HDMI-CEC de la tele.
+- open_phone_screen(): Muestra la pantalla del movil en el PC mediante scrcpy.
+- tablet_display(action='start'|'stop'): Usa la tablet como segunda pantalla con wayvnc.
+- favorite_song(): Marca la cancion que esta sonando como favorita en Navidrome.
+- navidrome_play(query='...'): Reproduce musica con cola inteligente en Navidrome.
+- media_handoff(): Transfiere la musica activa del PC al telefono movil.
 
 REGLAS CRÍTICAS:
 1. SOLO puedes llamar a herramientas del catalogo. No inventes herramientas inexistentes.
@@ -264,11 +289,19 @@ REGLAS CRÍTICAS:
 12. Si el usuario consulta procesos con mas consumo, usa TOOL: process_monitor.
 13. Si el usuario consulta el repositorio o git, usa TOOL: git_status.
 14. Si pide mandar captura, archivo o url al movil, usa las herramientas phone_send_*.
-15. Si el usuario quiere ejecutar una accion, responde EXACTAMENTE en este formato:
+15. Si pide activar una escena (cine, trabajo, buenas noches), usa TOOL: trigger_scene.
+16. Si pide mandar lo que ve o escucha a la tele, usa TOOL: cast_media(target='tele').
+17. Si pide abrir Netflix, Prime o YouTube en la tele, usa TOOL: launch_tv_app.
+18. Si pide encender o apagar la tele por HDMI, usa TOOL: cec_control.
+19. Si pide ver la pantalla del movil en el PC, usa TOOL: open_phone_screen().
+20. Si pide conectar la tablet como segunda pantalla, usa TOOL: tablet_display(action='start').
+21. Si pide marcar la cancion como favorita, usa TOOL: favorite_song().
+22. Si pide pasar la musica al movil, usa TOOL: media_handoff().
+23. Si el usuario quiere ejecutar una accion, responde EXACTAMENTE en este formato:
 
 TOOL: <nombre>(<parametros>)
 <mensaje breve para decir en voz alta>
-16. Si el usuario hace una pregunta general conversacional, responde breve y sin TOOL.
+24. Si el usuario hace una pregunta general conversacional, responde breve y sin TOOL.
 
 Ejemplos:
 Usuario: manda una captura del espacio 3 al movil
@@ -423,6 +456,50 @@ Hoy es domingo, 4 de octubre de 2026.
 Usuario: como esta el pc
 TOOL: pc_summary()
 Consultando el estado del equipo.
+
+Usuario: activa el modo cine
+TOOL: trigger_scene(name='modo_cine')
+Activando el modo cine.
+
+Usuario: modo trabajo
+TOOL: trigger_scene(name='modo_trabajo')
+Activando el modo trabajo.
+
+Usuario: buenas noches
+TOOL: trigger_scene(name='buenas_noches')
+Buenas noches, apagando y bloqueando el equipo.
+
+Usuario: manda esto a la tele
+TOOL: cast_media(target='tele')
+Enviando contenido a la television.
+
+Usuario: pon netflix en la tele
+TOOL: launch_tv_app(name='netflix', target='tele')
+Abriendo Netflix en la television.
+
+Usuario: enciende la tele
+TOOL: cec_control(action='turn_on', target='tele')
+Encendiendo la television.
+
+Usuario: apaga la tele
+TOOL: cec_control(action='turn_off', target='tele')
+Apagando la television.
+
+Usuario: muestra la pantalla del movil
+TOOL: open_phone_screen()
+Mostrando la pantalla del telefono en el PC.
+
+Usuario: usa la tablet como segunda pantalla
+TOOL: tablet_display(action='start')
+Iniciando segunda pantalla para la tablet.
+
+Usuario: marca esta cancion como favorita
+TOOL: favorite_song()
+Marcando cancion como favorita en Navidrome.
+
+Usuario: pasa la musica al movil
+TOOL: media_handoff()
+Transfiriendo reproduccion al telefono movil.
 
 Usuario: hola como estas
 Hola, estoy listo para ayudarte."""

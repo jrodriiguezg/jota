@@ -422,3 +422,96 @@ def transfer_playback_to_phone() -> tuple[bool, str]:
         msg += f" de {current_artist}"
     msg += "."
     return True, msg
+
+
+def mark_current_song_favorite() -> tuple[bool, str]:
+    """
+    Marca la pista que esta sonando actualmente como favorita en Navidrome.
+    """
+    current_title = ""
+    current_artist = ""
+    current_song_id = ""
+
+    # 1. Inspeccionar reproductor interno
+    internal_status = get_navidrome_player_status()
+    if internal_status and internal_status.get("status") in ("Playing", "Paused"):
+        current_title = internal_status.get("title", "")
+        current_artist = internal_status.get("artist", "")
+        current_song_id = internal_status.get("song_id", "")
+    elif shutil.which("playerctl"):
+        try:
+            format_str = "{{title}}\t{{artist}}"
+            proc_meta = subprocess.run(
+                ["playerctl", "metadata", "--format", format_str],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if proc_meta.returncode == 0 and proc_meta.stdout.strip():
+                parts = proc_meta.stdout.strip().split("\t")
+                if len(parts) >= 1:
+                    current_title = parts[0]
+                if len(parts) >= 2:
+                    current_artist = parts[1]
+        except Exception:
+            pass
+
+    if not current_title and not current_song_id:
+        return False, "No hay ninguna cancion reproduciendose para marcar como favorita."
+
+    if not current_song_id:
+        found_song = search_song(f"{current_title} {current_artist}".strip())
+        if found_song:
+            current_song_id = found_song.get("id", "")
+
+    if not current_song_id:
+        return False, f"No se encontro el identificador de '{current_title}' en Navidrome."
+
+    res = _call_subsonic("star", {"id": current_song_id})
+    if res.get("status") == "ok":
+        name_display = current_title or "Pista actual"
+        return True, f"'{name_display}' anadida a favoritos en Navidrome."
+    return False, "No se pudo marcar la cancion como favorita en Navidrome."
+
+
+def cast_current_song_to_tv(target: str = "tele") -> tuple[bool, str]:
+    """
+    Emite la cancion que esta sonando en el PC directamente hacia la television mediante catt.
+    """
+    from jota.tools.cast import cast_media
+
+    # Si hay reproduccion interna, detenerla o pausarla
+    internal_status = get_navidrome_player_status()
+    current_song_id = ""
+    current_title = ""
+    if internal_status and internal_status.get("status") in ("Playing", "Paused"):
+        current_song_id = internal_status.get("song_id", "")
+        current_title = internal_status.get("title", "")
+        stop_navidrome_player()
+    elif shutil.which("playerctl"):
+        try:
+            format_str = "{{title}}\t{{artist}}"
+            proc_meta = subprocess.run(
+                ["playerctl", "metadata", "--format", format_str],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if proc_meta.returncode == 0 and proc_meta.stdout.strip():
+                parts = proc_meta.stdout.strip().split("\t")
+                if len(parts) >= 1:
+                    current_title = parts[0]
+                if len(parts) >= 2:
+                    current_artist = parts[1]
+                    found = search_song(f"{current_title} {current_artist}".strip())
+                    if found:
+                        current_song_id = found.get("id", "")
+            subprocess.run(["playerctl", "pause"], capture_output=True, check=False)
+        except Exception:
+            pass
+
+    stream_url = get_stream_url(current_song_id) if current_song_id else ""
+    return cast_media(target=target, media_url=stream_url)
+
