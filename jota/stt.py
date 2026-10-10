@@ -67,16 +67,19 @@ def transcribe(audio_path: Path) -> str | None:
             return None
 
         # whisper -otxt escribe <audio_path>.txt
+        raw_text = ""
         if txt_file.exists():
-            text = txt_file.read_text(encoding="utf-8").strip()
-            if text:
-                logger.info("Transcripcion: %r", text)
-                return text
+            raw_text = txt_file.read_text(encoding="utf-8").strip()
+        elif result.stdout.strip():
+            raw_text = result.stdout.strip()
 
-        # fallback: parsear stdout si el archivo txt no se genero
-        text = result.stdout.strip()
-        if text:
-            return text
+        if raw_text:
+            # Descartar alucinaciones de whisper sobre silencio (ej. [SILENCIO], [Puerto], (ruido))
+            if re.match(r"^\[[\w\s.-]+\]$", raw_text) or re.match(r"^\([\w\s.-]+\)$", raw_text):
+                logger.debug("Artefacto de silencio descartado: %r", raw_text)
+                return None
+            logger.info("Transcripcion: %r", raw_text)
+            return raw_text
 
         logger.warning("whisper.cpp no devolvio texto.")
         return None
