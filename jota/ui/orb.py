@@ -89,6 +89,18 @@ class JotaOrbWindow(Gtk.Window):
         self._interval_ms = max(10, 1000 // ORB_FPS)
         GLib.timeout_add(self._interval_ms, self._on_tick)
 
+        # Indicador en la bandeja del sistema (System Tray)
+        self.tray = None
+        try:
+            from jota.config import TRAY_ENABLED
+
+            if TRAY_ENABLED:
+                from jota.ui.tray import JotaTrayIndicator
+
+                self.tray = JotaTrayIndicator(orb_window=self)
+        except Exception as e:
+            logger.warning("No se pudo iniciar el icono de la bandeja: %s", e)
+
     def _on_realize(self, widget: Gtk.Widget) -> None:
         """Configura la ventana como transparente al puntero del raton."""
         gdk_win = self.get_window()
@@ -153,6 +165,9 @@ class JotaOrbWindow(Gtk.Window):
 
         if level >= 0.0:
             self.voice_level = min(1.0, max(0.0, level))
+
+        if getattr(self, "tray", None):
+            self.tray.set_state(self.state)
 
     def set_voice_level(self, level: float) -> None:
         """Actualiza la intensidad del audio para reactividad visual."""
