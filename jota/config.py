@@ -133,6 +133,9 @@ ORB_SOCKET_PATH = Path("/tmp/jota_orb.sock")
 # Ocultar completamente el orbe cuando este en reposo (idle) para que sea sigiloso
 ORB_AUTO_HIDE_IDLE = os.getenv("JOTA_ORB_AUTO_HIDE", "true").lower() in ("true", "1", "yes")
 
+# Bandeja del sistema (System Tray / AppIndicator)
+TRAY_ENABLED = os.getenv("JOTA_TRAY", "true").lower() in ("true", "1", "yes")
+
 # ── Herramientas (Fase 2) ────────────────────────────────────────────────────
 
 # Navidrome / Subsonic (Musica inteligente y Handoff)

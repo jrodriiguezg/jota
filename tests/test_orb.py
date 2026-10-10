@@ -133,3 +133,26 @@ class TestOrbWindowLogic:
         # Debe haberse ocultado completamente (modo sigiloso)
         assert win.current_alpha <= 0.005
         assert win.get_visible() is False
+
+
+class TestTrayIndicator:
+    """Verifica la inicializacion y control de estado del tray icon."""
+
+    def test_tray_init_and_state(self):
+        try:
+            import sys
+
+            for p in ["/usr/lib/python3.14/site-packages", "/usr/lib64/python3.14/site-packages"]:
+                if p not in sys.path:
+                    sys.path.append(p)
+            from jota.ui.tray import JotaTrayIndicator
+        except Exception:
+            pytest.skip("Dependencias graficas no disponibles para tray")
+
+        tray = JotaTrayIndicator(orb_window=None)
+        if tray.indicator is None:
+            pytest.skip("AppIndicator3 no disponible en entorno de test")
+
+        tray.set_state("listening")
+        assert tray.indicator is not None
+        tray.set_state("idle")
