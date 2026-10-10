@@ -186,6 +186,19 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         query = search_suffix.group(3).strip()
         return "web_search", {"query": query}
 
+    # 4b. Apps en la television / Smart TV
+    m_tv_app_early = re.search(
+        r"^(?:abre|abrir|pon|poner|inicia|iniciar)\s+"
+        r"(netflix|prime(?:\s+video)?|youtube|plex|kodi|spotify)\s+"
+        r"en\s+la\s+(tele|televisi[oó]n|tv)$",
+        clean,
+    )
+    if m_tv_app_early:
+        return "launch_tv_app", {
+            "name": m_tv_app_early.group(1).strip(),
+            "target": m_tv_app_early.group(2).strip(),
+        }
+
     # 5. Abrir aplicaciones
     open_app_match = re.search(
         r"^(por\s+favor\s+|puedes\s+)?"
@@ -207,7 +220,8 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
             "puerto",
         )
         if not any(app_target.startswith(p) for p in reserved_app_prefixes):
-            return "open_app", {"name": app_target}
+            if not re.search(r"\ben\s+la\s+(?:tele|televisi[oó]n|tv)\b", app_target):
+                return "open_app", {"name": app_target}
 
 
     # 5b. Nombre directo de aplicacion o alias conocido
@@ -591,6 +605,128 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     if m_file:
         return "phone_send_file", {"target": m_file.group(1).strip()}
 
+    # 25. Escenas y rutinas configuradas en scenes.yaml
+    if re.search(
+        r"^(?:que\s+escenas\s+hay|lista(?:r)?\s+(?:las\s+)?escenas|cuales\s+son\s+las\s+escenas)$",
+        clean,
+    ):
+        return "list_scenes", {}
+
+    if re.search(
+        r"^(?:modo\s+cine|activa\s+el\s+modo\s+cine|vamos\s+a\s+ver\s+una\s+peli(?:cula)?)$",
+        clean,
+    ):
+        return "trigger_scene", {"name": "modo_cine"}
+
+    if re.search(
+        r"^(?:modo\s+trabajo|activa\s+el\s+modo\s+trabajo|a\s+trabajar)$",
+        clean,
+    ):
+        return "trigger_scene", {"name": "modo_trabajo"}
+
+    if re.search(
+        r"^(?:buenas\s+noches|modo\s+dormir|a\s+dormir|hora\s+de\s+dormir)$",
+        clean,
+    ):
+        return "trigger_scene", {"name": "buenas_noches"}
+
+    m_scene = re.search(
+        r"^(?:activa|activar|pon|poner|inicia|iniciar|ejecuta|ejecutar)\s+"
+        r"(?:la\s+)?(?:escena|modo|rutina)\s+([a-zA-Z0-9_ -]+)$",
+        clean,
+    )
+    if m_scene:
+        return "trigger_scene", {"name": m_scene.group(1).strip()}
+
+    # 26. HDMI-CEC (Control de encendido y fuente de la tele)
+    m_cec_on = re.search(
+        r"^(?:enciende|encender)\s+(?:la\s+)?(tele|televisi[oó]n|tv)$",
+        clean,
+    )
+    if m_cec_on:
+        return "cec_control", {"action": "turn_on", "target": m_cec_on.group(1)}
+
+    m_cec_off = re.search(
+        r"^(?:apaga|apagar)\s+(?:la\s+)?(tele|televisi[oó]n|tv)$",
+        clean,
+    )
+    if m_cec_off:
+        return "cec_control", {"action": "turn_off", "target": m_cec_off.group(1)}
+
+    m_cec_switch = re.search(
+        r"^(?:cambia|cambiar|conmuta|conmutar)\s+(?:la\s+entrada|a\s+este\s+pc|al\s+pc)\s+"
+        r"(?:en|de)\s+la\s+(tele|televisi[oó]n|tv)$",
+        clean,
+    )
+    if m_cec_switch:
+        return "cec_control", {"action": "switch", "target": m_cec_switch.group(1)}
+
+    # 27. Casting de contenido / video hacia la tele o dispositivo
+    m_cast_media = re.search(
+        r"^(?:manda|mandar|envia|enviar|pasa|pasar|proyecta|proyectar|pon|poner)\s+"
+        r"(?:esto|este\s+v[ií]deo|este\s+video|el\s+v[ií]deo|el\s+video|lo\s+mismo|el\s+contenido)\s+"
+        r"(?:a|en)\s+la\s+(tele|televisi[oó]n|tv|salon|pantalla)$"
+        r"|^(?:manda|mandar|envia|enviar|pasa|pasar|pon|poner)\s+lo\s+mismo\s+"
+        r"en\s+la\s+(tele|televisi[oó]n|tv|salon|pantalla)$",
+        clean,
+    )
+    if m_cast_media:
+        target_dev = m_cast_media.group(1) or m_cast_media.group(2) or "tele"
+        return "cast_media", {"target": target_dev}
+
+    if re.search(r"^(?:pausa|pausar)\s+la\s+tele$", clean):
+        return "cast_control", {"action": "pause", "target": "tele"}
+
+    if re.search(r"^(?:reanuda|reanudar)\s+la\s+tele$", clean):
+        return "cast_control", {"action": "resume", "target": "tele"}
+
+    if re.search(r"^(?:para|parar|deten|detener)\s+(?:el\s+cast|el\s+casteo|la\s+tele)$", clean):
+        return "cast_control", {"action": "stop", "target": "tele"}
+
+    m_tv_app = re.search(
+        r"^(?:abre|abrir|pon|poner)\s+(netflix|prime(?:\s+video)?|youtube|plex|kodi|spotify)\s+"
+        r"en\s+la\s+(tele|televisi[oó]n|tv)$",
+        clean,
+    )
+    if m_tv_app:
+        return "launch_tv_app", {
+            "name": m_tv_app.group(1).strip(),
+            "target": m_tv_app.group(2).strip(),
+        }
+
+    # 28. Favoritos en Navidrome
+    if re.search(
+        r"^(?:marca|marcar|guarda|guardar|anade|anadir|pon|poner)\s+"
+        r"(?:esta\s+canci[oó]n|este\s+tema|esta\s+pista)\s+(?:a|en|como)\s+favorit[ao]s?$"
+        r"|^(?:canci[oó]n\s+favorita|me\s+gusta\s+esta\s+canci[oó]n)$",
+        clean,
+    ):
+        return "favorite_song", {}
+
+    # 29. Pantalla del movil en el PC (scrcpy)
+    if re.search(
+        r"^(?:muestra|muestrame|abre|abrir|ver|pon)\s+"
+        r"(?:la\s+pantalla\s+del\s+m[oó]vil|la\s+pantalla\s+del\s+tel[eé]fono|el\s+m[oó]vil|el\s+tel[eé]fono|scrcpy)$"
+        r"|^(?:pantalla\s+del\s+m[oó]vil|pantalla\s+del\s+tel[eé]fono)$"
+        r"|^scrcpy$",
+        clean,
+    ):
+        return "open_phone_screen", {}
+
+    # 30. Tablet como segunda pantalla
+    if re.search(
+        r"^(?:conecta|conectar|usa|usar|activa|activar)\s+"
+        r"(?:la\s+)?tablet(?:\s+como\s+(?:segunda\s+)?pantalla)?$",
+        clean,
+    ):
+        return "tablet_display", {"action": "start"}
+
+    if re.search(
+        r"^(?:desconecta|desconectar|apaga|apagar)\s+(?:la\s+)?tablet$",
+        clean,
+    ):
+        return "tablet_display", {"action": "stop"}
+
     return None
 
 
@@ -971,6 +1107,50 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
     ):
         return "media_handoff", {}
 
+    # 35. Escenas y rutinas
+    if norm_name in ("triggerscene", "scene", "activarescena", "activarmodo", "modo"):
+        name = args.get("name") or args.get("scene") or args.get("target", "")
+        return "trigger_scene", {"name": str(name)}
+
+    if norm_name in ("listscenes", "listarescenas"):
+        return "list_scenes", {}
+
+    # 36. Cast y transmision de video / media
+    if norm_name in ("castmedia", "cast", "castear", "emitir", "proyectar"):
+        target = args.get("target") or args.get("device") or "tele"
+        media_url = args.get("media_url") or args.get("url") or args.get("link", "")
+        return "cast_media", {"target": str(target), "media_url": str(media_url)}
+
+    if norm_name in ("castcontrol", "controlcast"):
+        action = args.get("action", "pause")
+        target = args.get("target", "tele")
+        return "cast_control", {"action": str(action), "target": str(target)}
+
+    if norm_name in ("launchtvapp", "tvapp", "openapptv"):
+        app_name = args.get("app_name") or args.get("name") or args.get("app", "")
+        target = args.get("target") or args.get("device", "tele")
+        return "launch_tv_app", {"name": str(app_name), "target": str(target)}
+
+    # 37. HDMI-CEC
+    if norm_name in ("ceccontrol", "cec", "tvpower", "hdmi"):
+        action = args.get("action", "turn_on")
+        target = args.get("target", "tele")
+        return "cec_control", {"action": str(action), "target": str(target)}
+
+    # 38. Pantalla del movil en PC (scrcpy)
+    if norm_name in ("openphonescreen", "phonescreen", "scrcpy", "vermovil", "pantallamovil"):
+        serial = args.get("serial", "")
+        return "open_phone_screen", {"serial": str(serial)}
+
+    # 39. Tablet como segunda pantalla
+    if norm_name in ("tabletdisplay", "tablet", "wayvnc", "pantallatablet"):
+        action = args.get("action", "start")
+        return "tablet_display", {"action": str(action)}
+
+    # 40. Cancion favorita en Navidrome
+    if norm_name in ("favoritesong", "star", "favorita", "marcarfavorita"):
+        return "favorite_song", {}
+
     return None
 
 
@@ -1173,6 +1353,51 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
     if tool_name == "media_handoff":
         from jota.tools.navidrome import transfer_playback_to_phone
         return transfer_playback_to_phone()
+
+    if tool_name == "trigger_scene":
+        from jota.tools.scenes import trigger_scene
+        return trigger_scene(args.get("name", ""))
+
+    if tool_name == "list_scenes":
+        from jota.tools.scenes import list_scenes
+        return list_scenes()
+
+    if tool_name == "cast_media":
+        from jota.tools.cast import cast_media
+        return cast_media(
+            target=args.get("target", "tele"),
+            media_url=args.get("media_url") or args.get("url"),
+        )
+
+    if tool_name == "cast_control":
+        from jota.tools.cast import cast_control
+        return cast_control(
+            action=args.get("action", "pause"),
+            target=args.get("target", "tele"),
+        )
+
+    if tool_name == "launch_tv_app":
+        from jota.tools.cast import launch_tv_app
+        app = args.get("name") or args.get("app_name") or args.get("app", "")
+        return launch_tv_app(app_name=app, target=args.get("target", "tele"))
+
+    if tool_name == "cec_control":
+        from jota.tools.cec import cec_control
+        action = args.get("action", "turn_on")
+        return cec_control(action=action, target=args.get("target", "tele"))
+
+    if tool_name == "open_phone_screen":
+        from jota.tools.streaming import open_phone_screen
+        return open_phone_screen(serial=args.get("serial"))
+
+    if tool_name == "tablet_display":
+        from jota.tools.streaming import start_tablet_display
+        action = args.get("action", "start")
+        return start_tablet_display(action=action)
+
+    if tool_name == "favorite_song":
+        from jota.tools.navidrome import mark_current_song_favorite
+        return mark_current_song_favorite()
 
     return False, f"Herramienta no implementada: {tool_name}"
 

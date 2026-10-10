@@ -1097,6 +1097,164 @@ class TestNavidromeAndHandoffTools:
         assert "Midnight City" in msg
 
 
+class TestScenesEngine:
+    """Verifica la carga y ejecucion de escenas y rutinas YAML."""
+
+    def test_scenes_fast_intents(self):
+        assert match_fast_intent("modo cine") == ("trigger_scene", {"name": "modo_cine"})
+        assert match_fast_intent("activa el modo cine") == ("trigger_scene", {"name": "modo_cine"})
+        assert match_fast_intent("modo trabajo") == ("trigger_scene", {"name": "modo_trabajo"})
+        assert match_fast_intent("buenas noches") == ("trigger_scene", {"name": "buenas_noches"})
+        assert match_fast_intent("activa la escena relax") == ("trigger_scene", {"name": "relax"})
+        assert match_fast_intent("cuales son las escenas") == ("list_scenes", {})
+
+    def test_scenes_llm_parsing(self):
+        call = parse_llm_tool_call("TOOL: trigger_scene(name='modo_cine')\nActivando cine.")
+        assert call == ("trigger_scene", {"name": "modo_cine"})
+
+        call_list = parse_llm_tool_call("TOOL: list_scenes()\nListando escenas.")
+        assert call_list == ("list_scenes", {})
+
+    @patch("jota.tools.scenes.ensure_scenes_file")
+    @patch("jota.tools.router.execute_tool")
+    def test_trigger_scene_execution(self, mock_exec, mock_scenes):
+        from jota.tools.scenes import trigger_scene
+
+        mock_scenes.return_value = {
+            "modo_cine": {
+                "actions": [
+                    {"tool": "brightness_control", "args": {"percent": 20}},
+                    {"tool": "cec_control", "args": {"action": "turn_on"}},
+                ]
+            }
+        }
+        mock_exec.return_value = (True, "OK")
+
+        ok, msg = trigger_scene("modo_cine")
+        assert ok is True
+        assert "modo cine activada correctamente" in msg
+        assert mock_exec.call_count == 2
+
+    @patch("jota.tools.scenes.ensure_scenes_file")
+    def test_trigger_scene_not_found(self, mock_scenes):
+        from jota.tools.scenes import trigger_scene
+
+        mock_scenes.return_value = {"modo_trabajo": {}}
+        ok, msg = trigger_scene("modo_fiesta")
+        assert ok is False
+        assert "No encontre la escena" in msg
+
+
+class TestCastAndCEC:
+    """Verifica las herramientas de emision hacia televisor y control HDMI-CEC."""
+
+    def test_cast_fast_intents(self):
+        assert match_fast_intent("manda esto a la tele") == ("cast_media", {"target": "tele"})
+        assert match_fast_intent("manda el video a la television") == (
+            "cast_media",
+            {"target": "television"},
+        )
+        assert match_fast_intent("pausa la tele") == (
+            "cast_control",
+            {"action": "pause", "target": "tele"},
+        )
+        assert match_fast_intent("reanuda la tele") == (
+            "cast_control",
+            {"action": "resume", "target": "tele"},
+        )
+        assert match_fast_intent("abre netflix en la tele") == (
+            "launch_tv_app",
+            {"name": "netflix", "target": "tele"},
+        )
+
+    def test_cec_fast_intents(self):
+        assert match_fast_intent("enciende la tele") == (
+            "cec_control",
+            {"action": "turn_on", "target": "tele"},
+        )
+        assert match_fast_intent("apaga la tele") == (
+            "cec_control",
+            {"action": "turn_off", "target": "tele"},
+        )
+        assert match_fast_intent("cambia la entrada en la tele") == (
+            "cec_control",
+            {"action": "switch", "target": "tele"},
+        )
+
+    @patch("shutil.which")
+    @patch("subprocess.Popen")
+    @patch("jota.tools.context.get_implicit_media_url")
+    def test_cast_media_execution(self, mock_url, mock_popen, mock_which):
+        from jota.tools.cast import cast_media
+
+        mock_which.return_value = "/usr/bin/catt"
+        mock_url.return_value = "https://youtube.com/watch?v=123"
+
+        ok, msg = cast_media(target="tele")
+        assert ok is True
+        assert "Enviando contenido a Android TV" in msg
+        mock_popen.assert_called_once()
+
+    @patch("shutil.which")
+    @patch("subprocess.run")
+    def test_cec_control_execution(self, mock_run, mock_which):
+        from jota.tools.cec import cec_control
+
+        mock_which.return_value = "/usr/bin/cec-client"
+        mock_run.return_value.returncode = 0
+
+        ok, msg = cec_control("turn_on")
+        assert ok is True
+        assert "Encendiendo la television" in msg
+
+
+class TestStreamingAndDevices:
+    """Verifica scrcpy, wayvnc y resolucion de contexto multi-dispositivo."""
+
+    def test_streaming_fast_intents(self):
+        assert match_fast_intent("muestra la pantalla del movil") == ("open_phone_screen", {})
+        assert match_fast_intent("scrcpy") == ("open_phone_screen", {})
+        assert match_fast_intent("conecta la tablet") == (
+            "tablet_display",
+            {"action": "start"},
+        )
+        assert match_fast_intent("desconecta la tablet") == (
+            "tablet_display",
+            {"action": "stop"},
+        )
+        assert match_fast_intent("marca esta cancion como favorita") == ("favorite_song", {})
+
+    @patch("shutil.which")
+    @patch("subprocess.Popen")
+    def test_open_phone_screen(self, mock_popen, mock_which):
+        from jota.tools.streaming import open_phone_screen
+
+        mock_which.return_value = "/usr/bin/scrcpy"
+        ok, msg = open_phone_screen()
+        assert ok is True
+        assert "Mostrando la pantalla del movil" in msg
+        mock_popen.assert_called_once()
+
+    @patch("jota.tools.navidrome.get_navidrome_player_status")
+    @patch("jota.tools.navidrome._call_subsonic")
+    def test_mark_current_song_favorite(self, mock_subsonic, mock_status):
+        from jota.tools.navidrome import mark_current_song_favorite
+
+        mock_status.return_value = {
+            "status": "Playing",
+            "title": "Starboy",
+            "artist": "The Weeknd",
+            "song_id": "fav123",
+        }
+        mock_subsonic.return_value = {"status": "ok"}
+
+        ok, msg = mark_current_song_favorite()
+        assert ok is True
+        assert "anadida a favoritos" in msg
+        mock_subsonic.assert_called_with("star", {"id": "fav123"})
+
+
+
 
 
 
