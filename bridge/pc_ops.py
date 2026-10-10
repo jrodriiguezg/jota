@@ -148,13 +148,30 @@ def get_battery_status() -> dict[str, Any]:
 
 
 def get_media_status() -> dict[str, Any]:
-    """Obtiene informacion detallada de la reproduccion multimedia actual (MPRIS)."""
+    """Obtiene informacion detallada de la reproduccion multimedia actual (MPRIS o Navidrome)."""
     empty_media = {
         "player": "",
         "title": "",
         "artist": "",
         "album": "",
     }
+
+    try:
+        from jota.tools.navidrome import get_navidrome_player_status
+
+        navi_st = get_navidrome_player_status()
+        if navi_st and navi_st.get("status") in ("Playing", "Paused"):
+            return {
+                "available": True,
+                "status": navi_st.get("status", "Playing"),
+                "player": navi_st.get("player", "Navidrome (Jota)"),
+                "title": navi_st.get("title", ""),
+                "artist": navi_st.get("artist", ""),
+                "album": navi_st.get("album", ""),
+            }
+    except Exception:
+        pass
+
     if not shutil.which("playerctl"):
         return {"available": False, "status": "unavailable", **empty_media}
 
@@ -512,11 +529,63 @@ def execute_pc_action(action: str) -> tuple[bool, str]:
             return set_volume_level(int(val_str))
         except ValueError:
             return False, f"Nivel de volumen invalido: {val_str}"
-    if clean_act in ("play_pause", "toggle_playback"):
+    if clean_act in ("play_pause", "toggle_playback", "media_play_pause"):
+        try:
+            from jota.tools.navidrome import (
+                _is_paused,
+                get_navidrome_player_status,
+                pause_navidrome_player,
+                resume_navidrome_player,
+            )
+
+            st = get_navidrome_player_status()
+            if st and st.get("status") in ("Playing", "Paused"):
+                if _is_paused:
+                    resume_navidrome_player()
+                    return True, "Reanudando reproduccion Navidrome."
+                else:
+                    pause_navidrome_player()
+                    return True, "Pausando reproduccion Navidrome."
+        except Exception:
+            pass
         return playback_control("play_pause")
-    if clean_act in ("next", "next_track"):
+
+    if clean_act in ("play", "media_play"):
+        try:
+            from jota.tools.navidrome import get_navidrome_player_status, resume_navidrome_player
+            st = get_navidrome_player_status()
+            if st and st.get("status") == "Paused":
+                resume_navidrome_player()
+                return True, "Reanudando reproduccion Navidrome."
+        except Exception:
+            pass
+        return playback_control("play")
+
+    if clean_act in ("pause", "media_pause"):
+        try:
+            from jota.tools.navidrome import get_navidrome_player_status, pause_navidrome_player
+            st = get_navidrome_player_status()
+            if st and st.get("status") == "Playing":
+                pause_navidrome_player()
+                return True, "Pausando reproduccion Navidrome."
+        except Exception:
+            pass
+        return playback_control("pause")
+
+    if clean_act in ("stop", "media_stop"):
+        try:
+            from jota.tools.navidrome import get_navidrome_player_status, stop_navidrome_player
+            st = get_navidrome_player_status()
+            if st:
+                stop_navidrome_player()
+                return True, "Reproduccion Navidrome detenida."
+        except Exception:
+            pass
+        return playback_control("stop")
+
+    if clean_act in ("next", "next_track", "media_next"):
         return playback_control("next")
-    if clean_act in ("previous", "prev", "prev_track"):
+    if clean_act in ("previous", "prev", "prev_track", "media_prev", "media_previous"):
         return playback_control("previous")
 
     if clean_act.startswith("open_url:"):

@@ -1010,6 +1010,94 @@ class TestWindowAndDisplayTools:
             mock_cw.assert_called_with(app_name="firefox")
 
 
+class TestNavidromeAndHandoffTools:
+    """Verifica la integracion de colas inteligentes y transferencia de musica."""
+
+    def test_fast_intents_navidrome(self):
+        res = match_fast_intent("pon la cancion Midnight City")
+        assert res == ("navidrome_play", {"query": "midnight city"})
+
+        res2 = match_fast_intent("reproduce algo de Queen")
+        assert res2 == ("navidrome_play", {"query": "queen"})
+
+        res3 = match_fast_intent("pon musica de M83")
+        assert res3 == ("navidrome_play", {"query": "m83"})
+
+    def test_fast_intents_handoff(self):
+        res = match_fast_intent("manda la reproduccion al movil")
+        assert res == ("media_handoff", {})
+
+        res2 = match_fast_intent("pasa la musica al movil")
+        assert res2 == ("media_handoff", {})
+
+        res3 = match_fast_intent("envia la musica al telefono")
+        assert res3 == ("media_handoff", {})
+
+    def test_parse_llm_tool_navidrome_and_handoff(self):
+        call1 = parse_llm_tool_call("TOOL: navidrome_play(query='Bohemian Rhapsody')")
+        assert call1 == ("navidrome_play", {"query": "Bohemian Rhapsody"})
+
+        call2 = parse_llm_tool_call("TOOL: media_handoff()")
+        assert call2 == ("media_handoff", {})
+
+    @patch("jota.tools.navidrome._call_subsonic")
+    @patch("jota.tools.navidrome.save_remote_play_queue")
+    @patch("jota.tools.navidrome.subprocess.run")
+    @patch("jota.tools.navidrome.subprocess.Popen")
+    @patch("jota.tools.navidrome.shutil.which")
+    def test_play_navidrome_smart_radio(
+        self, mock_which, mock_popen, mock_run, mock_save, mock_subsonic
+    ):
+        from jota.tools.navidrome import play_navidrome_smart_radio
+
+        mock_which.return_value = "/usr/bin/ffplay"
+        mock_popen.return_value.poll.return_value = None
+        mock_run.return_value.returncode = 0
+
+        def _fake_subsonic(endpoint, params=None):
+            if endpoint == "search3":
+                song = [{"id": "s1", "title": "Track 1", "artist": "Artist 1", "genre": "Rock"}]
+                return {"searchResult3": {"song": song}}
+            if endpoint == "getRandomSongs":
+                song = [{"id": "s2", "title": "Track 2", "artist": "Artist 2"}]
+                return {"randomSongs": {"song": song}}
+            return {}
+
+        mock_subsonic.side_effect = _fake_subsonic
+        mock_save.return_value = True
+
+        ok, msg = play_navidrome_smart_radio("Track 1")
+        assert ok is True
+        assert "Reproduciendo Track 1" in msg
+        assert "emisora" in msg
+        mock_save.assert_called_once()
+
+    @patch("jota.tools.navidrome.get_navidrome_player_status")
+    @patch("jota.tools.navidrome.save_remote_play_queue")
+    @patch("bridge.phone_manager.phone_manager.send_media_handoff")
+    def test_transfer_playback_to_phone(self, mock_handoff, mock_save, mock_status):
+        from jota.tools.navidrome import transfer_playback_to_phone
+
+        mock_status.return_value = {
+            "status": "Playing",
+            "title": "Midnight City",
+            "artist": "M83",
+            "song_id": "U123",
+        }
+        mock_save.return_value = True
+
+        async def _fake_send(*args, **kwargs):
+            return True
+
+        mock_handoff.side_effect = _fake_send
+
+        ok, msg = transfer_playback_to_phone()
+        assert ok is True
+        assert "transferida al movil" in msg
+        assert "Midnight City" in msg
+
+
+
 
 
 

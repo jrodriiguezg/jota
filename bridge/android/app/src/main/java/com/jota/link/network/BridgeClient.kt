@@ -35,6 +35,8 @@ class BridgeClient(
         fun onSilent(silent: Boolean)
         fun onReceiveFile(filename: String, remotePath: String, sizeBytes: Long)
         fun onPcNotification(title: String, message: String) {}
+        fun onPcMediaUpdate(mediaData: JSONObject) {}
+        fun onMediaHandoff(handoffData: JSONObject) {}
     }
 
     var listener: BridgeListener? = null
@@ -61,6 +63,25 @@ class BridgeClient(
                     val payload = json.optJSONObject("payload") ?: JSONObject()
 
                     when (event) {
+                        "connected" -> {
+                            val pcStatus = json.optJSONObject("pc_status")
+                            val media = pcStatus?.optJSONObject("media")
+                            if (media != null) {
+                                listener?.onPcMediaUpdate(media)
+                            }
+                        }
+                        "pc_status" -> {
+                            val media = payload.optJSONObject("media")
+                            if (media != null) {
+                                listener?.onPcMediaUpdate(media)
+                            }
+                        }
+                        "pc_media" -> {
+                            listener?.onPcMediaUpdate(payload)
+                        }
+                        "media_handoff" -> {
+                            listener?.onMediaHandoff(payload)
+                        }
                         "ring" -> {
                             val duration = payload.optInt("duration_seconds", 15)
                             listener?.onRing(duration)

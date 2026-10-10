@@ -135,6 +135,12 @@ ORB_AUTO_HIDE_IDLE = os.getenv("JOTA_ORB_AUTO_HIDE", "true").lower() in ("true",
 
 # ── Herramientas (Fase 2) ────────────────────────────────────────────────────
 
+# Navidrome / Subsonic (Musica inteligente y Handoff)
+NAVIDROME_URL = os.getenv("NAVIDROME_URL", "https://navidrome.jrodriiguezg.link")
+NAVIDROME_USER = os.getenv("NAVIDROME_USER", "admin")
+NAVIDROME_SALT = os.getenv("NAVIDROME_SALT", "998e36")
+NAVIDROME_TOKEN = os.getenv("NAVIDROME_TOKEN", "b8df572fe408e8abbebc19311f6fc99c")
+
 VOLUME_STEP_PERCENT = 5
 BROWSER_BIN = "firefox"
 WEB_SEARCH_URL = "https://www.google.com/search?q="

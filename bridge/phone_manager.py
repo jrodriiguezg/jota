@@ -175,6 +175,18 @@ class PhoneConnectionManager:
             device_id=device_id,
         )
 
+    async def send_media_status(
+        self, media_data: dict[str, Any], device_id: str | None = None
+    ) -> bool:
+        """Envia el estado multimedia actualizado del PC a dispositivos moviles."""
+        return await self.send_event("pc_media", media_data, device_id=device_id)
+
+    async def send_media_handoff(
+        self, handoff_data: dict[str, Any], device_id: str | None = None
+    ) -> bool:
+        """Envia evento de handoff para continuar la reproduccion en el movil."""
+        return await self.send_event("media_handoff", handoff_data, device_id=device_id)
+
 
 # Instancia compartida global del gestor
 phone_manager = PhoneConnectionManager()

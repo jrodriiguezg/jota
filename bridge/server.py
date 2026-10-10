@@ -120,6 +120,32 @@ async def lifespan(app: FastAPI):
 
     clip_task = asyncio.create_task(monitor_clipboard())
 
+    # 3b. Monitor en segundo plano para sincronizacion de estado multimedia
+    media_task = None
+    async def monitor_media():
+        from bridge.pc_ops import get_media_status
+
+        last_sig = None
+        while True:
+            await asyncio.sleep(1.5)
+            try:
+                cur_media = get_media_status()
+                sig = (
+                    cur_media.get("status"),
+                    cur_media.get("title"),
+                    cur_media.get("artist"),
+                    cur_media.get("player"),
+                )
+                if sig != last_sig:
+                    last_sig = sig
+                    await phone_manager.send_media_status(cur_media)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    media_task = asyncio.create_task(monitor_media())
+
     # 4. Listener de la tecla Copilot para push-to-talk en el PC
     copilot_service = None
     try:
@@ -142,6 +168,9 @@ async def lifespan(app: FastAPI):
 
     if clip_task:
         clip_task.cancel()
+
+    if media_task:
+        media_task.cancel()
 
     if mdns_handle:
         try:
@@ -246,6 +275,15 @@ class PhoneFilePayload(BaseModel):
     filename: str
     remote_path: str
     size_bytes: int = 0
+    device_id: str | None = None
+
+
+class MediaHandoffPayload(BaseModel):
+    title: str = ""
+    artist: str = ""
+    song_id: str = ""
+    position_ms: int = 0
+    stream_url: str = ""
     device_id: str | None = None
 
 
@@ -552,6 +590,20 @@ async def send_file_to_phone(payload: PhoneFilePayload):
             detail="No hay ningun telefono conectado para recibir el archivo.",
         )
     return {"success": True, "message": f"Archivo '{payload.filename}' enviado al telefono."}
+
+
+@app.post("/api/v1/phone/media_handoff", dependencies=[Depends(verify_auth)])
+async def phone_media_handoff(payload: MediaHandoffPayload):
+    """Envia orden de transferencia de reproduccion al telefono movil."""
+    ok = await phone_manager.send_media_handoff(
+        payload.model_dump(), device_id=payload.device_id
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No hay ningun telefono conectado para recibir la reproduccion.",
+        )
+    return {"success": True, "message": "Handoff enviado al telefono."}
 
 
 @app.get("/api/v1/phone/status", dependencies=[Depends(verify_auth)])
