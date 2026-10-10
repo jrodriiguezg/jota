@@ -77,6 +77,16 @@ class JotaOrbWindow(Gtk.Window):
         self.set_default_size(self.size, self.size)
         self.set_size_request(self.size, self.size)
 
+        if not GLib.get_prgname():
+            GLib.set_prgname("jota")
+        if not GLib.get_application_name():
+            GLib.set_application_name("Jota")
+        try:
+            self.set_icon_name("jota")
+            Gtk.Window.set_default_icon_name("jota")
+        except Exception:
+            pass
+
         # Area de dibujo
         self.darea = Gtk.DrawingArea()
         self.darea.connect("draw", self.on_draw)

@@ -41,6 +41,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.animation.core.*
 import androidx.core.content.ContextCompat
+import androidx.compose.ui.res.painterResource
+import com.jota.link.R
 import com.jota.link.audio.AudioHelper
 import com.jota.link.network.BridgeClient
 import com.jota.link.network.JotaDiscoveryManager
@@ -527,6 +529,14 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                Image(
+                                    painter = painterResource(id = R.mipmap.ic_launcher),
+                                    contentDescription = "Jota Logo",
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
                                 Text(
                                     "JOTA",
                                     fontWeight = FontWeight.ExtraBold,
