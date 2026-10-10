@@ -22,20 +22,29 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
     private val audioHelper = AudioHelper()
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    private var mediaSession: android.media.session.MediaSession? = null
+    private var localMediaPlayer: android.media.MediaPlayer? = null
+
     private var lastSyncedClipboard: String = ""
     private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
     private var clipboardDebounceJob: Job? = null
 
     companion object {
         const val CHANNEL_ID = "jota_bridge_channel"
+        const val MEDIA_CHANNEL_ID = "jota_media_channel"
         const val NOTIFICATION_ID = 1001
+        const val MEDIA_NOTIFICATION_ID = 1002
         const val ACTION_STOP_ALARM = "com.jota.link.STOP_ALARM"
         const val ACTION_TOGGLE_WAKE_WORD = "com.jota.link.TOGGLE_WAKE_WORD"
+        const val ACTION_MEDIA_PLAY_PAUSE = "com.jota.link.MEDIA_PLAY_PAUSE"
+        const val ACTION_MEDIA_NEXT = "com.jota.link.MEDIA_NEXT"
+        const val ACTION_MEDIA_PREV = "com.jota.link.MEDIA_PREV"
     }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        initMediaSession()
         vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
             vm.defaultVibrator
@@ -67,6 +76,38 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
         }
     }
 
+    private fun initMediaSession() {
+        mediaSession = android.media.session.MediaSession(this, "JotaLinkMedia").apply {
+            setCallback(object : android.media.session.MediaSession.Callback() {
+                override fun onPlay() {
+                    if (localMediaPlayer != null && !localMediaPlayer!!.isPlaying) {
+                        localMediaPlayer?.start()
+                        updateLocalPlaybackState(true)
+                    } else {
+                        serviceScope.launch { bridgeClient?.executePcAction("play") }
+                    }
+                }
+
+                override fun onPause() {
+                    if (localMediaPlayer != null && localMediaPlayer!!.isPlaying) {
+                        localMediaPlayer?.pause()
+                        updateLocalPlaybackState(false)
+                    } else {
+                        serviceScope.launch { bridgeClient?.executePcAction("pause") }
+                    }
+                }
+
+                override fun onSkipToNext() {
+                    serviceScope.launch { bridgeClient?.executePcAction("next") }
+                }
+
+                override fun onSkipToPrevious() {
+                    serviceScope.launch { bridgeClient?.executePcAction("previous") }
+                }
+            })
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP_ALARM) {
             stopAlarm()
@@ -76,6 +117,31 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
         if (intent?.action == ACTION_TOGGLE_WAKE_WORD) {
             val enable = intent.getBooleanExtra("enable", false)
             setupWakeWord(enable)
+            return START_STICKY
+        }
+
+        if (intent?.action == ACTION_MEDIA_PLAY_PAUSE) {
+            if (localMediaPlayer != null) {
+                if (localMediaPlayer!!.isPlaying) {
+                    localMediaPlayer?.pause()
+                    updateLocalPlaybackState(false)
+                } else {
+                    localMediaPlayer?.start()
+                    updateLocalPlaybackState(true)
+                }
+            } else {
+                serviceScope.launch { bridgeClient?.executePcAction("play_pause") }
+            }
+            return START_STICKY
+        }
+
+        if (intent?.action == ACTION_MEDIA_NEXT) {
+            serviceScope.launch { bridgeClient?.executePcAction("next") }
+            return START_STICKY
+        }
+
+        if (intent?.action == ACTION_MEDIA_PREV) {
+            serviceScope.launch { bridgeClient?.executePcAction("previous") }
             return START_STICKY
         }
 
@@ -215,15 +281,173 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
         nm.notify((System.currentTimeMillis() % 10000).toInt() + 2000, notif)
     }
 
+    override fun onPcMediaUpdate(mediaData: org.json.JSONObject) {
+        val status = mediaData.optString("status", "")
+        val title = mediaData.optString("title", "")
+        val artist = mediaData.optString("artist", "")
+        val album = mediaData.optString("album", "")
+        val isPlaying = status.equals("Playing", ignoreCase = true)
+        val isPaused = status.equals("Paused", ignoreCase = true)
+
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if ((!isPlaying && !isPaused) || title.isEmpty()) {
+            mediaSession?.isActive = false
+            nm.cancel(MEDIA_NOTIFICATION_ID)
+            return
+        }
+
+        mediaSession?.setMetadata(
+            android.media.MediaMetadata.Builder()
+                .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, title)
+                .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, artist)
+                .putString(android.media.MediaMetadata.METADATA_KEY_ALBUM, album)
+                .build()
+        )
+
+        val state = if (isPlaying) android.media.session.PlaybackState.STATE_PLAYING else android.media.session.PlaybackState.STATE_PAUSED
+        val actions = android.media.session.PlaybackState.ACTION_PLAY or
+            android.media.session.PlaybackState.ACTION_PAUSE or
+            android.media.session.PlaybackState.ACTION_PLAY_PAUSE or
+            android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT or
+            android.media.session.PlaybackState.ACTION_SKIP_TO_PREVIOUS
+
+        mediaSession?.setPlaybackState(
+            android.media.session.PlaybackState.Builder()
+                .setActions(actions)
+                .setState(state, android.media.session.PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
+                .build()
+        )
+        mediaSession?.isActive = true
+
+        val prevIntent = PendingIntent.getService(
+            this, 1,
+            Intent(this, JotaBridgeService::class.java).apply { action = ACTION_MEDIA_PREV },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val playPauseIntent = PendingIntent.getService(
+            this, 2,
+            Intent(this, JotaBridgeService::class.java).apply { action = ACTION_MEDIA_PLAY_PAUSE },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val nextIntent = PendingIntent.getService(
+            this, 3,
+            Intent(this, JotaBridgeService::class.java).apply { action = ACTION_MEDIA_NEXT },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val iconPlayPause = if (isPlaying) {
+            android.R.drawable.ic_media_pause
+        } else {
+            android.R.drawable.ic_media_play
+        }
+
+        @Suppress("DEPRECATION")
+        val notifBuilder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, MEDIA_CHANNEL_ID)
+        } else {
+            Notification.Builder(this)
+        }
+
+        val mediaStyle = Notification.MediaStyle()
+            .setMediaSession(mediaSession?.sessionToken)
+            .setShowActionsInCompactView(0, 1, 2)
+
+        val notif = notifBuilder
+            .setContentTitle(title)
+            .setContentText(if (artist.isNotEmpty()) "$artist • En el PC" else "Reproduciendo en PC")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setStyle(mediaStyle)
+            .addAction(Notification.Action.Builder(android.R.drawable.ic_media_previous, "Anterior", prevIntent).build())
+            .addAction(Notification.Action.Builder(iconPlayPause, "Play/Pausa", playPauseIntent).build())
+            .addAction(Notification.Action.Builder(android.R.drawable.ic_media_next, "Siguiente", nextIntent).build())
+            .setOngoing(isPlaying)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .build()
+
+        nm.notify(MEDIA_NOTIFICATION_ID, notif)
+    }
+
+    override fun onMediaHandoff(handoffData: org.json.JSONObject) {
+        val title = handoffData.optString("title", "Canción")
+        val artist = handoffData.optString("artist", "")
+        val streamUrl = handoffData.optString("stream_url", "")
+        val positionMs = handoffData.optInt("position_ms", 0)
+
+        Handler(Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(
+                applicationContext,
+                "Reproduccion transferida al movil: $title",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+
+        if (streamUrl.isNotEmpty()) {
+            try {
+                localMediaPlayer?.release()
+                localMediaPlayer = android.media.MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build()
+                    )
+                    setDataSource(streamUrl)
+                    setOnPreparedListener { mp ->
+                        if (positionMs > 0) {
+                            mp.seekTo(positionMs)
+                        }
+                        mp.start()
+                        updateLocalPlaybackState(true, title, artist)
+                    }
+                    setOnCompletionListener {
+                        updateLocalPlaybackState(false)
+                    }
+                    prepareAsync()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun updateLocalPlaybackState(isPlaying: Boolean, title: String = "", artist: String = "") {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (title.isNotEmpty()) {
+            mediaSession?.setMetadata(
+                android.media.MediaMetadata.Builder()
+                    .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, title)
+                    .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, artist)
+                    .build()
+            )
+        }
+        val state = if (isPlaying) android.media.session.PlaybackState.STATE_PLAYING else android.media.session.PlaybackState.STATE_PAUSED
+        mediaSession?.setPlaybackState(
+            android.media.session.PlaybackState.Builder()
+                .setActions(android.media.session.PlaybackState.ACTION_PLAY or android.media.session.PlaybackState.ACTION_PAUSE or android.media.session.PlaybackState.ACTION_PLAY_PAUSE)
+                .setState(state, android.media.session.PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
+                .build()
+        )
+        mediaSession?.isActive = isPlaying
+        if (!isPlaying && localMediaPlayer == null) {
+            nm.cancel(MEDIA_NOTIFICATION_ID)
+        }
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val nm = getSystemService(NotificationManager::class.java)
+            val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
                 "Jota Bridge Service",
                 NotificationManager.IMPORTANCE_LOW
             )
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(channel)
+            val mediaChannel = NotificationChannel(
+                MEDIA_CHANNEL_ID,
+                "Multimedia Jota",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            nm.createNotificationChannel(serviceChannel)
+            nm.createNotificationChannel(mediaChannel)
         }
     }
 
@@ -284,6 +508,8 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
 
     override fun onDestroy() {
         stopAlarm()
+        mediaSession?.release()
+        localMediaPlayer?.release()
         wakeWordDetector?.stopListening()
         clipboardDebounceJob?.cancel()
         clipboardListener?.let {

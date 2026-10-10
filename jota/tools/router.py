@@ -147,6 +147,28 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     ):
         return "media_control", {"action": "play"}
 
+    # 3e. Reproducir cancion especifica o artista con cola inteligente (Navidrome)
+    m_navidrome = re.search(
+        r"^(?:pon|ponme|reproduce|reproducir)\s+"
+        r"(?:la\s+canci[oó]n|el\s+tema|la\s+pista|m[uú]sica\s+de|algo\s+de)\s+"
+        r"(.+)$"
+        r"|^(?:pon|ponme|reproduce|reproducir)\s+a\s+(.+)$",
+        clean,
+    )
+    if m_navidrome:
+        target = (m_navidrome.group(1) or m_navidrome.group(2) or "").strip()
+        if target:
+            return "navidrome_play", {"query": target}
+
+    # 3f. Handoff de reproduccion al telefono movil
+    if re.search(
+        r"^(?:manda|mandar|envia|enviar|pasa|pasar|mueve|mover)\s+"
+        r"(?:la\s+)?(?:reproducci[oó]n|m[uú]sica|canci[oó]n)\s+"
+        r"al\s+(?:m[oó]vil|tel[eé]fono|celular)$",
+        clean,
+    ):
+        return "media_handoff", {}
+
     # 4. Busqueda web
     search_prefix = re.search(
         r"^(por\s+favor\s+)?(busca|buscame|buscar|encuentra)\s+en\s+(la\s+)?(web|google|internet)\s+(.+)$",
@@ -927,6 +949,28 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         target = args.get("target") or args.get("name") or args.get("file") or ""
         return "phone_send_file", {"target": str(target)}
 
+    # 33. Navidrome smart radio
+    if norm_name in (
+        "navidromeplay",
+        "navidrome",
+        "playsong",
+        "smartradio",
+        "reproducircancion",
+        "cancion",
+    ):
+        query = args.get("query") or args.get("song") or args.get("name") or args.get("target", "")
+        return "navidrome_play", {"query": str(query)}
+
+    # 34. Transferencia multimedia al movil
+    if norm_name in (
+        "mediahandoff",
+        "handoffmedia",
+        "transferplayback",
+        "pasarmusicaalmovil",
+        "mandarmusicaalmovil",
+    ):
+        return "media_handoff", {}
+
     return None
 
 
@@ -1120,6 +1164,15 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
     if tool_name == "phone_send_file":
         from jota.tools.phone import send_active_file_to_phone
         return send_active_file_to_phone(target=args.get("target", ""))
+
+    if tool_name == "navidrome_play":
+        from jota.tools.navidrome import play_navidrome_smart_radio
+        query = args.get("query", "")
+        return play_navidrome_smart_radio(query)
+
+    if tool_name == "media_handoff":
+        from jota.tools.navidrome import transfer_playback_to_phone
+        return transfer_playback_to_phone()
 
     return False, f"Herramienta no implementada: {tool_name}"
 
