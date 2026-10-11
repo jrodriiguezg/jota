@@ -35,3 +35,11 @@ htmlcov/
 
 # Ruff
 .ruff_cache/
+
+# Android y Gradle
+.gradle/
+local.properties
+*.apk
+*.aab
+captures/
+.cxx/

@@ -20,6 +20,7 @@ Permite controlar el sistema operativo mediante lenguaje natural, gestionar vent
   - [Configuracion del PC (jota/config.py)](#configuracion-del-pc-jotaconfigpy)
   - [Configuracion del Bridge (bridge/config.py)](#configuracion-del-bridge-bridgeconfigpy)
   - [Configuracion de Jota Hub (compose.yaml)](#configuracion-de-jota-hub-composeyaml)
+  - [Descarga e Instalacion de la App Android JotaLink](#descarga-e-instalacion-de-la-app-android-jotalink)
   - [Configuracion de la App Android JotaLink](#configuracion-de-la-app-android-jotalink)
 - [Ejecucion como Servicio Systemd](#ejecucion-como-servicio-systemd)
 - [Consultar Registros con Journalctl](#consultar-registros-con-journalctl)
@@ -284,6 +285,35 @@ services:
       - ./models:/app/models:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
 ```
+
+### Descarga e Instalacion de la App Android JotaLink
+
+Los archivos binarios compilados (`.apk`) no se guardan directamente dentro del historial de Git para evitar sobrecargar el repositorio con archivos binarios pesados. Dispones de varias opciones para obtener e instalar la aplicacion en tu telefono:
+
+#### Opcion A: Descarga desde GitHub (Releases y Actions)
+1. **GitHub Releases:** Dirigete a la seccion [Releases de GitHub](https://github.com/jrodriiguezg/jota/releases) y descarga el archivo `app-debug.apk` o `JotaLink.apk` adjunto a la ultima version publicada.
+2. **GitHub Actions (Artifacts):** Cada cambio enviado a las ramas `main`, `bridge` o `jota-hub` ejecuta un flujo automatizado (`.github/workflows/android.yml`) que compila la aplicacion y genera un artefacto descargable denominado `JotaLink-APK`.
+
+#### Opcion B: Descarga directa desde tu propio Jota Hub o PC Bridge
+Tanto el contenedor Docker de **Jota Hub** como el servicio **Jota Bridge** ofrecen un endpoint HTTP directo para descargar el instalador APK sin salir de tu red:
+- **Desde Tailscale (remoto):** `http://100.x.y.z:8765/download/jotalink.apk`
+- **Desde LAN (local):** `http://192.168.1.100:8765/download/jotalink.apk` (o la IP local de tu PC en modo Bridge)
+
+Abre esa direccion en el navegador de tu movil (Chrome, Firefox, etc.) para descargar el archivo e instalarlo directamente pulsando sobre la notificacion de descarga.
+
+#### Opcion C: Instalacion directa por cable USB (ADB)
+Si tienes el telefono conectado al ordenador por USB y con la depuracion USB activada:
+```bash
+adb install -r bridge/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+#### Opcion D: Compilacion manual desde codigo fuente
+Si deseas compilar la aplicacion por tu cuenta en tu maquina:
+```bash
+cd bridge/android
+./gradlew assembleDebug
+```
+El archivo binario generado estara ubicado en `bridge/android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ### Configuracion de la App Android JotaLink
 
