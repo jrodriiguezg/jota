@@ -133,6 +133,11 @@ class TestOrbWindowLogic:
         # Debe haberse ocultado completamente (modo sigiloso)
         assert win.current_alpha <= 0.005
         assert win.get_visible() is False
+        assert win._timer_id is None
+
+        # Al reactivarse, el timer se rearma de forma automatica
+        win.set_state("thinking")
+        assert win._timer_id is not None
 
 
 class TestTrayIndicator:

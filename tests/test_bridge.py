@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from bridge.config import BRIDGE_API_KEY
 from bridge.pc_ops import (
+    execute_pc_action,
     get_cpu_load,
     get_disk_info,
     get_memory_info,
@@ -333,7 +334,7 @@ class TestBridgeAPI:
         # Endpoint GET /api/v1/pc/channels
         resp = client.get(
             "/api/v1/pc/channels",
-            headers={"X-Bridge-Key": "jota-secret-tailscale-key"},
+            headers={"X-Bridge-Key": BRIDGE_API_KEY},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -574,6 +575,27 @@ class TestMobileTransferFeatures:
             ok, msg = execute_tool("phone_send_file", {"target": ""})
             assert ok is True
             assert "Archivo enviado" in msg
+
+    def test_execute_pc_action_url_schemes(self):
+        # Esquemas no permitidos
+        ok, msg = execute_pc_action("open_url: file:///etc/passwd")
+        assert ok is False
+        assert "Esquema no permitido" in msg
+
+        ok, msg = execute_pc_action("open_url: javascript:alert(1)")
+        assert ok is False
+        assert "Esquema no permitido" in msg
+
+        # Esquema valido http/https con mock
+        with patch("jota.tools.apps.spawn_detached", return_value=True):
+            ok, msg = execute_pc_action("open_url: https://example.com")
+            assert ok is True
+            assert "Abriendo enlace" in msg
+
+    def test_download_apk_head_support(self, client):
+        resp = client.head("/download/jotalink.apk")
+        # No debe devolver 405 Method Not Allowed
+        assert resp.status_code in (200, 404)
 
 
 

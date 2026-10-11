@@ -590,6 +590,10 @@ def execute_pc_action(action: str) -> tuple[bool, str]:
 
     if clean_act.startswith("open_url:"):
         url = action.split(":", 1)[1].strip()
+        # Seguridad: Solo admitir esquemas seguros web para evitar ejecucion de binarios o scripts
+        clean_url = url.lower()
+        if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
+            return False, "Esquema no permitido. Solo se pueden abrir enlaces http:// y https://."
         try:
             from jota.tools.apps import spawn_detached
             if spawn_detached(["xdg-open", url]):

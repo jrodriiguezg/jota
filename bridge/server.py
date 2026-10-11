@@ -5,6 +5,7 @@ con dispositivos Android.
 """
 
 import asyncio
+import hmac
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -108,6 +109,8 @@ async def lifespan(app: FastAPI):
             last_clip = ""
         while True:
             await asyncio.sleep(1.2)
+            if not phone_manager.is_connected():
+                continue
             try:
                 current = get_clipboard_text()
                 if current and current != last_clip and len(current) < 20000:
@@ -128,6 +131,8 @@ async def lifespan(app: FastAPI):
         last_sig = None
         while True:
             await asyncio.sleep(1.5)
+            if not phone_manager.is_connected():
+                continue
             try:
                 cur_media = get_media_status()
                 sig = (
@@ -212,7 +217,10 @@ def verify_auth(
     # Comprobar intentos fallidos previos para esta IP
     attempts = _failed_auth_log.get(client_ip, [])
     valid_attempts = [t for t in attempts if (now - t) < AUTH_RATE_LIMIT_WINDOW_SECONDS]
-    _failed_auth_log[client_ip] = valid_attempts
+    if valid_attempts:
+        _failed_auth_log[client_ip] = valid_attempts
+    else:
+        _failed_auth_log.pop(client_ip, None)
 
     if len(valid_attempts) >= AUTH_RATE_LIMIT_MAX_FAILURES:
         logger.warning("Bloqueo por rate limiting de autenticacion para IP %s", client_ip)
@@ -227,7 +235,7 @@ def verify_auth(
     elif authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
 
-    if token != BRIDGE_API_KEY:
+    if not token or not hmac.compare_digest(str(token), str(BRIDGE_API_KEY)):
         _failed_auth_log.setdefault(client_ip, []).append(now)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -235,8 +243,7 @@ def verify_auth(
         )
 
     # Limpiar registro al autenticar con exito
-    if client_ip in _failed_auth_log:
-        _failed_auth_log.pop(client_ip, None)
+    _failed_auth_log.pop(client_ip, None)
 
 
 # ── Modelos de Peticion ──────────────────────────────────────────────────────
@@ -302,8 +309,8 @@ def health_check():
     }
 
 
-@app.get("/download/jotalink.apk")
-@app.get("/api/v1/download/apk")
+@app.api_route("/download/jotalink.apk", methods=["GET", "HEAD"])
+@app.api_route("/api/v1/download/apk", methods=["GET", "HEAD"])
 def download_apk():
     """Descarga directa del paquete APK de JotaLink para Android."""
     candidate_paths = [
@@ -661,10 +668,28 @@ async def phone_websocket_endpoint(
     Mantiene la conexion abierta, recibe reportes de bateria y escucha comandos
     de alarma, portapapeles y enlaces enviados desde el PC.
     """
-    # Validar autenticacion
-    if token != BRIDGE_API_KEY:
+    # Proteccion contra fuerza bruta y escaneo en WebSocket
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    now = time.time()
+    attempts = _failed_auth_log.get(client_ip, [])
+    valid_attempts = [t for t in attempts if (now - t) < AUTH_RATE_LIMIT_WINDOW_SECONDS]
+    if valid_attempts:
+        _failed_auth_log[client_ip] = valid_attempts
+    else:
+        _failed_auth_log.pop(client_ip, None)
+
+    if len(valid_attempts) >= AUTH_RATE_LIMIT_MAX_FAILURES:
+        logger.warning("Bloqueo de WebSocket por rate limiting para IP %s", client_ip)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+
+    # Validar autenticacion en tiempo constante contra ataques de canal lateral
+    if not token or not hmac.compare_digest(str(token), str(BRIDGE_API_KEY)):
+        _failed_auth_log.setdefault(client_ip, []).append(now)
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    _failed_auth_log.pop(client_ip, None)
 
     await websocket.accept()
     await phone_manager.register(

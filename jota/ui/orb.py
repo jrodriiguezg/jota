@@ -95,9 +95,15 @@ class JotaOrbWindow(Gtk.Window):
         # Transparencia total a eventos de raton (click-through absoluto)
         self.connect("realize", self._on_realize)
 
-        # Timer de animacion a 60 FPS
+        # Timer de animacion a 60 FPS con suspension automatica en reposo
         self._interval_ms = max(10, 1000 // ORB_FPS)
-        GLib.timeout_add(self._interval_ms, self._on_tick)
+        self._timer_id: int | None = None
+        self._ensure_timer()
+
+    def _ensure_timer(self) -> None:
+        """Asegura que el timer de refresco este activo cuando hay animacion."""
+        if self._timer_id is None:
+            self._timer_id = GLib.timeout_add(self._interval_ms, self._on_tick)
 
         # Indicador en la bandeja del sistema (System Tray)
         self.tray = None
@@ -173,6 +179,9 @@ class JotaOrbWindow(Gtk.Window):
             if ORB_AUTO_HIDE_IDLE and not self.get_visible():
                 self.show_all()
 
+        if clean != "idle" or self.current_alpha > 0.005:
+            self._ensure_timer()
+
         if level >= 0.0:
             self.voice_level = min(1.0, max(0.0, level))
 
@@ -182,6 +191,8 @@ class JotaOrbWindow(Gtk.Window):
     def set_voice_level(self, level: float) -> None:
         """Actualiza la intensidad del audio para reactividad visual."""
         self.voice_level = min(1.0, max(0.0, level))
+        if self.state != "idle":
+            self._ensure_timer()
 
     def _on_tick(self) -> bool:
         """Paso de tiempo del bucle de animacion."""
@@ -201,6 +212,8 @@ class JotaOrbWindow(Gtk.Window):
                 self.darea.queue_draw()
             if ORB_AUTO_HIDE_IDLE and self.get_visible():
                 self.hide()
+            self._timer_id = None
+            return False
 
         return True
 
