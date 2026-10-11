@@ -145,7 +145,8 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
             return START_STICKY
         }
 
-        val baseUrl = intent?.getStringExtra("baseUrl") ?: "http://100.64.0.1:8765"
+        val baseUrl = intent?.getStringExtra("baseUrl") ?: "http://192.168.1.100:8765"
+        val fallbackUrl = intent?.getStringExtra("fallbackUrl") ?: "http://100.x.y.z:8765"
         val apiKey = intent?.getStringExtra("apiKey") ?: "jota-secret-tailscale-key"
         val deviceId = intent?.getStringExtra("deviceId") ?: "android_phone"
         val enableWakeWord = intent?.getBooleanExtra("enableWakeWord", false) ?: false
@@ -153,7 +154,7 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
         startForeground(NOTIFICATION_ID, buildNotification("Conectando a Jota Bridge..."))
 
         bridgeClient?.disconnect()
-        bridgeClient = BridgeClient(this, baseUrl, apiKey, deviceId).apply {
+        bridgeClient = BridgeClient(this, baseUrl, apiKey, deviceId, fallbackUrl).apply {
             listener = this@JotaBridgeService
             connectWebSocket()
         }

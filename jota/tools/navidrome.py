@@ -30,12 +30,36 @@ _paused_elapsed_seconds: float = 0.0
 _is_paused: bool = False
 
 
+def _load_navidrome_credentials() -> tuple[str, str, str, str]:
+    """Carga credenciales de Navidrome desde entorno o ~/.config/jota/navidrome.json."""
+    from pathlib import Path
+
+    url = NAVIDROME_URL
+    user = NAVIDROME_USER
+    salt = NAVIDROME_SALT
+    token = NAVIDROME_TOKEN
+
+    cfg_file = Path.home() / ".config" / "jota" / "navidrome.json"
+    if (not token or not salt) and cfg_file.is_file():
+        try:
+            with open(cfg_file, encoding="utf-8") as f:
+                data = json.load(f)
+            url = data.get("url") or url
+            user = data.get("user") or user
+            salt = data.get("salt") or salt
+            token = data.get("token") or token
+        except Exception as e:
+            logger.debug("No se pudo leer navidrome.json: %s", e)
+    return url, user, salt, token
+
+
 def _get_subsonic_url(endpoint: str, extra_params: dict[str, Any] | None = None) -> str:
     """Construye la URL firmada para la API Subsonic."""
+    url, user, salt, token = _load_navidrome_credentials()
     params = {
-        "u": NAVIDROME_USER,
-        "s": NAVIDROME_SALT,
-        "t": NAVIDROME_TOKEN,
+        "u": user,
+        "s": salt,
+        "t": token,
         "v": "1.16.1",
         "c": "jota",
         "f": "json",
@@ -43,7 +67,7 @@ def _get_subsonic_url(endpoint: str, extra_params: dict[str, Any] | None = None)
     if extra_params:
         params.update(extra_params)
     query_str = urllib.parse.urlencode(params)
-    return f"{NAVIDROME_URL.rstrip('/')}/rest/{endpoint}.view?{query_str}"
+    return f"{url.rstrip('/')}/rest/{endpoint}.view?{query_str}"
 
 
 def _call_subsonic(

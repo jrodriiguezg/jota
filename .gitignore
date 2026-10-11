@@ -43,3 +43,8 @@ local.properties
 *.aab
 captures/
 .cxx/
+
+# Variables de entorno y secretos
+.env
+*.env
+!.env.example
