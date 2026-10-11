@@ -7,25 +7,25 @@ services:
     container_name: jota-hub
     restart: unless-stopped
     ports:
-      - "8765:8765"
+      - "${JOTA_HUB_PORT:-8765}:8765"
     environment:
       - JOTA_BRIDGE_HOST=0.0.0.0
       - JOTA_BRIDGE_PORT=8765
-      - JOTA_BRIDGE_API_KEY=jota-secret-tailscale-key
+      - JOTA_BRIDGE_API_KEY=${JOTA_BRIDGE_API_KEY:-jota-secret-tailscale-key}
       - JOTA_STT_ENGINE=faster_whisper
-      - JOTA_FASTER_WHISPER_MODEL=base
-      - JOTA_FASTER_WHISPER_COMPUTE=int8
-      - JOTA_LLM_MODEL=/app/models/qwen/qwen2.5-1.5b-instruct-q4_k_m.gguf
-      - JOTA_LLM_CTX=4096
-      - JOTA_LLM_THREADS=4
+      - JOTA_FASTER_WHISPER_MODEL=${JOTA_FASTER_WHISPER_MODEL:-base}
+      - JOTA_FASTER_WHISPER_COMPUTE=${JOTA_FASTER_WHISPER_COMPUTE:-int8}
+      - JOTA_LLM_MODEL=${JOTA_LLM_MODEL:-/app/models/qwen/qwen2.5-1.5b-instruct-q4_k_m.gguf}
+      - JOTA_LLM_CTX=${JOTA_LLM_CTX:-4096}
+      - JOTA_LLM_THREADS=${JOTA_LLM_THREADS:-4}
       - JOTA_ORB_ENABLED=false
       - JOTA_TRAY=false
-      - MUSIC_ASSISTANT_URL=http://100.x.y.z:8095
-      - MUSIC_ASSISTANT_TOKEN=tu_token_larga_duracion
-      - NAVIDROME_URL=https://navidrome.ejemplo.local
-      - NAVIDROME_USER=admin
-      - NAVIDROME_SALT=tu_salt_navidrome
-      - NAVIDROME_TOKEN=tu_token_navidrome
+      - MUSIC_ASSISTANT_URL=${MUSIC_ASSISTANT_URL:-http://localhost:8095}
+      - MUSIC_ASSISTANT_TOKEN=${MUSIC_ASSISTANT_TOKEN:-}
+      - NAVIDROME_URL=${NAVIDROME_URL:-http://localhost:4533}
+      - NAVIDROME_USER=${NAVIDROME_USER:-admin}
+      - NAVIDROME_SALT=${NAVIDROME_SALT:-}
+      - NAVIDROME_TOKEN=${NAVIDROME_TOKEN:-}
     volumes:
       - ./data:/app/data
       - ./models:/app/models:ro

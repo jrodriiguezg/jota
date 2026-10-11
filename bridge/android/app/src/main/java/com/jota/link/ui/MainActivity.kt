@@ -69,8 +69,8 @@ class MainActivity : ComponentActivity() {
     private var bridgeClient: BridgeClient? = null
     private lateinit var prefs: SharedPreferences
 
-    private var serverUrl by mutableStateOf("http://100.x.y.z:8765")
-    private var serverFallbackUrl by mutableStateOf("http://192.168.1.100:8765")
+    private var serverUrl by mutableStateOf("http://192.168.1.100:8765")
+    private var serverFallbackUrl by mutableStateOf("http://100.x.y.z:8765")
     private var apiKey by mutableStateOf("jota-secret-tailscale-key")
     private var deviceId by mutableStateOf("android_user")
 
@@ -86,8 +86,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("jota_link_prefs", Context.MODE_PRIVATE)
 
-        serverUrl = prefs.getString("server_url", "http://100.x.y.z:8765") ?: "http://100.x.y.z:8765"
-        serverFallbackUrl = prefs.getString("server_fallback_url", "http://192.168.1.100:8765") ?: "http://192.168.1.100:8765"
+        serverUrl = prefs.getString("server_url", "http://192.168.1.100:8765") ?: "http://192.168.1.100:8765"
+        serverFallbackUrl = prefs.getString("server_fallback_url", "http://100.x.y.z:8765") ?: "http://100.x.y.z:8765"
         apiKey = prefs.getString("api_key", "jota-secret-tailscale-key") ?: "jota-secret-tailscale-key"
         deviceId = prefs.getString("device_id", "android_user") ?: "android_user"
 
@@ -694,8 +694,8 @@ class MainActivity : ComponentActivity() {
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 listOf(
-                                    "Hub Tailscale" to ("http://100.x.y.z:8765" to "http://192.168.1.100:8765"),
-                                    "PC Local" to ("http://100.x.y.z:8765" to "http://192.168.1.100:8765"),
+                                    "Hub Remoto" to ("http://100.x.y.z:8765" to "http://192.168.1.100:8765"),
+                                    "PC Local" to ("http://192.168.1.100:8765" to "http://127.0.0.1:8765"),
                                     "USB Tether" to ("http://192.168.42.1:8765" to "http://127.0.0.1:8765")
                                 ).forEach { (label, urls) ->
                                     val isSelected = inputUrl == urls.first

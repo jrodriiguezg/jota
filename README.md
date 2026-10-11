@@ -116,7 +116,7 @@ Este modo traslada el cerebro central de Jota a un contenedor Docker aislado den
 - **Como funciona:**
   - El contenedor `jota-hub` corre las 24 horas del dia en el servidor.
   - Cuenta con un motor de transcripcion optimizado para CPU multinucleo (**faster-whisper** con cuantizacion `int8`) y el modelo **Qwen2.5-1.5B** (o `0.5B` para maxima ligereza).
-  - Tu telefono Android (JotaLink) se conecta directamente al servidor Hub (por Tailscale `100.x.y.z:8765` con fallback automatico a LAN `192.168.1.100:8765`).
+  - Tu telefono Android (JotaLink) se conecta directamente al servidor Hub (por Tailscale ej. `100.x.y.z:8765` con fallback automatico a LAN `192.168.1.x:8765`).
   - **Independencia del PC:** Puedes hablarle a Jota desde la cama, la cocina o fuera de casa sin necesidad de que tu PC de escritorio este encendido.
   - **Control del Homelab:** Puedes consultar el estado de los contenedores Docker, controlar la reproduccion multiroom en **Music Assistant**, buscar pistas en **Navidrome** o consultar **Home Assistant**.
   - **Encendido remoto del PC:** Si necesitas tu ordenador, solo tienes que decirle a Jota desde el movil: *"Despierta el PC"*; Jota Hub emitira un paquete magico Wake-on-LAN hacia la tarjeta de red de tu PC para encenderlo inmediatamente.
@@ -277,7 +277,7 @@ services:
       - JOTA_LLM_THREADS=4
       - JOTA_ORB_ENABLED=false
       - JOTA_TRAY=false
-      - MUSIC_ASSISTANT_URL=http://100.x.y.z:8095
+      - MUSIC_ASSISTANT_URL=http://tu-servidor:8095
       - MUSIC_ASSISTANT_TOKEN=tu_token_larga_duracion
       - NAVIDROME_URL=https://navidrome.tudominio.link
     volumes:
@@ -296,8 +296,8 @@ Los archivos binarios compilados (`.apk`) no se guardan directamente dentro del 
 
 #### Opcion B: Descarga directa desde tu propio Jota Hub o PC Bridge
 Tanto el contenedor Docker de **Jota Hub** como el servicio **Jota Bridge** ofrecen un endpoint HTTP directo para descargar el instalador APK sin salir de tu red:
-- **Desde Tailscale (remoto):** `http://100.x.y.z:8765/download/jotalink.apk`
-- **Desde LAN (local):** `http://192.168.1.100:8765/download/jotalink.apk` (o la IP local de tu PC en modo Bridge)
+- **Desde Tailscale (remoto):** `http://<ip-o-nombre-tailscale>:8765/download/jotalink.apk`
+- **Desde LAN (local):** `http://<ip-lan-servidor>:8765/download/jotalink.apk` (o la IP local de tu PC en modo Bridge)
 
 Abre esa direccion en el navegador de tu movil (Chrome, Firefox, etc.) para descargar el archivo e instalarlo directamente pulsando sobre la notificacion de descarga.
 
@@ -322,8 +322,8 @@ La aplicacion Android (`bridge/android`) incluye soporte para conmutacion por er
 1. **Abre JotaLink** en tu dispositivo.
 2. Despliega el panel de **Conexion y Red**.
 3. Configura las dos URLs disponibles:
-   - **Server URL Principal (Tailscale / Remoto):** `http://100.x.y.z:8765`
-   - **Fallback Server URL (LAN / Alternativo):** `http://192.168.1.100:8765`
+   - **Server URL Principal (Tailscale / Remoto):** `http://100.x.y.z:8765` (tu IP Tailscale)
+   - **Fallback Server URL (LAN / Alternativo):** `http://192.168.1.x:8765` (tu IP local)
 4. Pulsa **Guardar y Conectar**.
 
 Si sales de casa o la red local cambia, la aplicacion intentara comunicarse con la IP primaria y, ante cualquier fallo de red o tiempo de espera, conmutara de forma transparente a la IP de fallback sin interrumpir tus solicitudes.
@@ -419,4 +419,4 @@ systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP
 El cliente de Jota detecta automaticamente los sockets activos en `/run/user/$UID/wayland-*`.
 
 ### 3. Jota Hub en Docker no puede conectarse a Music Assistant o Navidrome
-Verifica que las variables de entorno de red apunten a la IP accesible desde el contenedor (por ejemplo, la IP de Tailscale del host `100.x.y.z` o la IP de red local `192.168.1.100`).
+Verifica que las variables de entorno de red apunten a la IP accesible desde el contenedor (por ejemplo, la IP de Tailscale del host `100.x.y.z` o la IP de red local `192.168.1.x`).

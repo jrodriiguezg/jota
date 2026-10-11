@@ -145,8 +145,8 @@ class JotaBridgeService : Service(), BridgeClient.BridgeListener {
             return START_STICKY
         }
 
-        val baseUrl = intent?.getStringExtra("baseUrl") ?: "http://100.x.y.z:8765"
-        val fallbackUrl = intent?.getStringExtra("fallbackUrl") ?: "http://192.168.1.100:8765"
+        val baseUrl = intent?.getStringExtra("baseUrl") ?: "http://192.168.1.100:8765"
+        val fallbackUrl = intent?.getStringExtra("fallbackUrl") ?: "http://100.x.y.z:8765"
         val apiKey = intent?.getStringExtra("apiKey") ?: "jota-secret-tailscale-key"
         val deviceId = intent?.getStringExtra("deviceId") ?: "android_phone"
         val enableWakeWord = intent?.getBooleanExtra("enableWakeWord", false) ?: false

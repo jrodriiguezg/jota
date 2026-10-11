@@ -146,13 +146,13 @@ TRAY_ENABLED = os.getenv("JOTA_TRAY", "true").lower() in ("true", "1", "yes")
 # ── Herramientas (Fase 2) ────────────────────────────────────────────────────
 
 # Navidrome / Subsonic (Musica inteligente y Handoff)
-NAVIDROME_URL = os.getenv("NAVIDROME_URL", "https://navidrome.ejemplo.local")
+NAVIDROME_URL = os.getenv("NAVIDROME_URL", "http://localhost:4533")
 NAVIDROME_USER = os.getenv("NAVIDROME_USER", "admin")
-NAVIDROME_SALT = os.getenv("NAVIDROME_SALT", "tu_salt_navidrome")
-NAVIDROME_TOKEN = os.getenv("NAVIDROME_TOKEN", "tu_token_navidrome")
+NAVIDROME_SALT = os.getenv("NAVIDROME_SALT", "")
+NAVIDROME_TOKEN = os.getenv("NAVIDROME_TOKEN", "")
 
 # Music Assistant (Sincronizacion y Handoff entre PC y Movil)
-MUSIC_ASSISTANT_URL = os.getenv("MUSIC_ASSISTANT_URL", "http://100.x.y.z:8095")
+MUSIC_ASSISTANT_URL = os.getenv("MUSIC_ASSISTANT_URL", "http://localhost:8095")
 MUSIC_ASSISTANT_TOKEN = os.getenv("MUSIC_ASSISTANT_TOKEN", "")
 MUSIC_ASSISTANT_CONFIG = Path.home() / ".config" / "jota" / "mass.json"
 
