@@ -597,9 +597,10 @@ class TestMobileTransferFeatures:
         # No debe devolver 405 Method Not Allowed
         assert resp.status_code in (200, 404)
 
+    @patch("bridge.server._docker_socket_request", return_value=(-1, b""))
     @patch("bridge.server.subprocess.run")
     @patch("bridge.server.shutil.which", return_value="/usr/bin/docker")
-    def test_homelab_containers_endpoint(self, mock_which, mock_run, client):
+    def test_homelab_containers_endpoint(self, mock_which, mock_run, mock_sock, client):
         proc = MagicMock()
         proc.returncode = 0
         proc.stdout = (
