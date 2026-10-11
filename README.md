@@ -1,25 +1,26 @@
-# Jota — Asistente de Voz Local y Ecosistema Multi-Dispositivo
+# Jota - Asistente de Voz Local y Ecosistema Multi-Dispositivo
 
-Jota es un asistente de voz autonomo, multimodal y completamente offline disenado para Linux bajo Wayland (Hyprland). Permite controlar el sistema operativo, gestionar ventanas, automatizar tareas mediante escenas YAML, sincronizar y controlar dispositivos moviles (Android), emitir contenido a Smart TVs (Chromecast y ADB), utilizar tablets como segunda pantalla y disfrutar de reproduccion musical inteligente con Navidrome.
+Jota es un asistente de voz autonomo, inteligente y privado para Linux (optimizado para entornos Wayland / Hyprland) con capacidad de extension multi-dispositivo y homelab.
+
+Permite controlar el sistema operativo mediante lenguaje natural, gestionar ventanas, automatizar rutinas mediante escenas YAML, sincronizar dispositivos Android (portapapeles universal, capturas, reproduccion), controlar servidores de musica (Music Assistant, Navidrome) y supervisar contenedores del homelab.
 
 ---
 
 ## Indice
 
-- [Arquitectura del Sistema](#arquitectura-del-sistema)
-- [Capacidades Principales](#capacidades-principales)
-  - [1. Razonamiento Local y Tool Calling con Qwen2.5-1.5B](#1-razonamiento-local-y-tool-calling-con-qwen25-15b)
-  - [2. Escenas y Rutinas Configurables en YAML](#2-escenas-y-rutinas-configurables-en-yaml)
-  - [3. Resolucion de Contexto Implicito](#3-resolucion-de-contexto-implicito)
-  - [4. Emision a Smart TV y Control HDMI-CEC](#4-emision-a-smart-tv-y-control-hdmi-cec)
-  - [5. Streaming de Pantallas, scrcpy y Monitores Virtuales](#5-streaming-de-pantallas-scrcpy-y-monitores-virtuales)
-  - [6. Navidrome, Smart Radio y Handoff Multimedia](#6-navidrome-smart-radio-y-handoff-multimedia)
-  - [7. Jota Bridge y Vinculacion Android](#7-jota-bridge-y-vinculacion-android)
-  - [8. Menu Contextual de Dolphin (KDE Service Menu)](#8-menu-contextual-de-dolphin-kde-service-menu)
-- [Catalogo de Herramientas y Comandos](#catalogo-de-herramientas-y-comandos)
-- [Requisitos del Sistema](#requisitos-del-sistema)
-- [Instalacion Paso a Paso](#instalacion-paso-a-paso)
-- [Configuracion](#configuracion)
+- [Pregunta Frecuente: Es obligatorio un servidor?](#pregunta-frecuente-es-obligatorio-un-servidor)
+- [Las Tres Versiones y Ramas del Proyecto](#las-tres-versiones-y-ramas-del-proyecto)
+  - [Modo 1: Solo PC (Standalone - Rama main)](#modo-1-solo-pc-standalone---rama-main)
+  - [Modo 2: PC + Movil (Bridge - Rama bridge)](#modo-2-pc--movil-bridge---rama-bridge)
+  - [Modo 3: Servidor Homelab 24/7 (Hub Docker - Rama jota-hub)](#modo-3-servidor-homelab-247-hub-docker---rama-jota-hub)
+- [Tabla Comparativa de Modos](#tabla-comparativa-de-modos)
+- [Instalador Automatizado Unificado](#instalador-automatizado-unificado)
+- [Arquitectura Tecnica](#arquitectura-tecnica)
+- [Configuracion de cada Modo](#configuracion-de-cada-modo)
+  - [Configuracion del PC (jota/config.py)](#configuracion-del-pc-jotaconfigpy)
+  - [Configuracion del Bridge (bridge/config.py)](#configuracion-del-bridge-bridgeconfigpy)
+  - [Configuracion de Jota Hub (compose.yaml)](#configuracion-de-jota-hub-composeyaml)
+  - [Configuracion de la App Android JotaLink](#configuracion-de-la-app-android-jotalink)
 - [Ejecucion como Servicio Systemd](#ejecucion-como-servicio-systemd)
 - [Consultar Registros con Journalctl](#consultar-registros-con-journalctl)
 - [Bateria de Pruebas](#bateria-de-pruebas)
@@ -27,220 +28,283 @@ Jota es un asistente de voz autonomo, multimodal y completamente offline disenad
 
 ---
 
-## Arquitectura del Sistema
+## Pregunta Frecuente: Es obligatorio un servidor?
 
-Jota funciona mediante una arquitectura desacoplada de alto rendimiento:
+**NO, el servidor NO es obligatorio.**
 
-| Componente | Tecnologia / Herramienta | Descripcion |
-|---|---|---|
-| Reconocimiento de Voz (STT) | [`whisper.cpp`](https://github.com/ggerganov/whisper.cpp) (`whisper-cli`) | Modelo `ggml-small.bin`. Transcripcion local de alta precision en espanol. |
-| Razonamiento e Inferencia (LLM) | [`llama-cpp-python`](https://github.com/abetlen/llama-cpp-python) | Modelo `qwen2.5-1.5b-instruct-q4_k_m.gguf` (1.5B parametros). Formato ChatML nativo. |
-| Sintesis de Voz (TTS) | [`piper-tts`](https://github.com/rhasspy/piper) | Voz neuronal `es_ES-sharvard-medium.onnx` ejecutada de forma local e instantanea. |
-| Enrutador de Intenciones | Enrutador hibrido de dos etapas | 1) Evaluacion por regex ultra-rapida (<10ms) para comandos frecuentes; 2) Fallback al LLM para deduccion contextual y tool calling estructurado. |
-| Orbe Visual | GTK4 / Layer Shell | Ventana de capa Wayland que muestra el estado de Jota en tiempo real (escucha, pensamiento, habla). |
-| Servidor Bridge y API | FastAPI + Uvicorn + WebSockets | Canal de comunicacion LAN con mDNS (ZeroConf) y reenvio ADB para dispositivos Android. |
-| Audio y Composicion | PipeWire / WirePlumber / Hyprland | Control directo de volumen (`wpctl`), reproduccion MPRIS (`playerctl`) y capturas (`grim`). |
+Jota fue disenado desde su concepcion como un asistente **100% local, offline y autonomo** para tu ordenador de escritorio. No requiere ningun servidor externo, cuenta en la nube ni conexion a internet para funcionar.
+
+El ecosistema cuenta con tres modos independientes para adaptarse a tus necesidades y hardware:
+
+1. **Puedes usar Jota unicamente en tu PC** (Modo Standalone): reconocimiento de voz local, LLM local y control del escritorio sin tocar la red.
+2. **Puedes usar Jota entre tu PC y tu movil Android** (Modo Bridge): tu propio PC actua como servidor cuando esta encendido. Tampoco requiere servidores externos.
+3. **Puedes usar Jota en un servidor Homelab 24/7** (Modo Hub): unicamente si dispones de un servidor (ej. HP EliteDesk) y deseas que el asistente este despierto las 24 horas del dia para hablarle desde el movil con el PC apagado o controlar la musica de toda la casa.
 
 ---
 
-## Capacidades Principales
+## Las Tres Versiones y Ramas del Proyecto
 
-### 1. Razonamiento Local y Tool Calling con Qwen2.5-1.5B
+El repositorio esta organizado en tres ramas principales, cada una optimizada para un caso de uso especifico:
 
-Jota utiliza el modelo **Qwen2.5-1.5B-Instruct** cuantizado a 4 bits (`qwen2.5-1.5b-instruct-q4_k_m.gguf`):
-- **Baja latencia:** Inferencia acotada a 4 hilos de CPU con tiempos de respuesta inferiores a 1 segundo.
-- **Modo Non-Thinking:** Configurado por defecto (`/no_think`) para evitar latencias innecesarias de razonamiento interno antes de emitir la orden.
-- **Formato de ejecucion estricto:** El modelo emite directivas en formato `TOOL: nombre_herramienta(parametro='...')` seguidas de una confirmacion breve. El sintetizador de voz lee exclusivamente el mensaje hablado, aislando la orden tecnica.
-- **Push-to-Talk (Tecla Copilot):** Al pulsar la tecla Copilot, Jota graba el audio mientras se mantiene presionada y lo procesa al soltarla. El modo manos libres continuo se encuentra desactivado por defecto para evitar transcripciones innecesarias de ruido ambiental.
-
-### 2. Escenas y Rutinas Configurables en YAML
-
-El motor de escenas ([`jota/tools/scenes.py`](file:///home/jrodriiguezg/Documentos/Proyectos/hyper/jota/jota/tools/scenes.py)) permite disparar secuencias de herramientas mediante un archivo de configuracion en `~/.config/jota/scenes.yaml`. Si el archivo no existe, Jota genera una configuracion inicial automatica:
-
-- **Modo Cine (`modo_cine`):** Pone la ventana activa en pantalla completa, reduce el brillo al 20%, enciende el filtro nocturno y enciende la television por HDMI-CEC.
-- **Modo Trabajo (`modo_trabajo`):** Ajusta el brillo al 80%, desactiva el filtro nocturno y cambia al espacio de trabajo 1.
-- **Buenas Noches (`buenas_noches`):** Activa el modo noche, silencia el audio, apaga el televisor via HDMI-CEC y bloquea la sesion del PC.
-
-### 3. Resolucion de Contexto Implicito
-
-El modulo [`jota/tools/context.py`](file:///home/jrodriiguezg/Documentos/Proyectos/hyper/jota/jota/tools/context.py) evita que el usuario tenga que dictar URLs o parametros extensos por voz:
-- Si el usuario dice *"manda esto a la tele"*, Jota inspecciona el portapapeles (`wl-paste`), la ventana activa de Hyprland (`hyprctl activewindow`) o la musica en reproduccion para obtener la URL o pista automaticamente.
-- Resolucion de alias de dispositivos: Coloquialismos como *"tele"*, *"salon"*, *"television"*, *"tablet"* o *"movil"* se mapean a sus direcciones y metodos de control correspondientes.
-
-### 4. Emision a Smart TV y Control HDMI-CEC
-
-- **Casting de medios (`catt`):** Emite cualquier enlace de video o flujo multimedia hacia dispositivos Chromecast o Android TV.
-- **Control de reproduccion:** Comandos para pausar, reanudar o detener el casteo en la tele.
-- **Lanzamiento de aplicaciones en Android TV:** Mediante ADB por red (`adb -s <ip>:5555 shell monkey -p <paquete> 1`), Jota puede abrir directamente apps nativas como Netflix, Prime Video, YouTube, Plex, Kodi y Spotify.
-- **HDMI-CEC (`cec-client`):** Enciende el televisor (*"enciende la tele"*), lo apaga (*"apaga la tele"*) o cambia la entrada HDMI activa al PC (*"cambia la entrada en la tele"*).
-
-### 5. Streaming de Pantallas, scrcpy y Monitores Virtuales
-
-- **Pantalla del movil en PC:** El comando *"muestra la pantalla del movil"* inicia `scrcpy` en una ventana independiente en Hyprland conectada por USB o Wi-Fi.
-- **Pantalla virtual headless:** Jota crea salidas virtuales en Hyprland sobre la marcha mediante `hyprctl output create headless`.
-- **Tablet como segunda pantalla:** El comando *"conecta la tablet"* inicializa una salida headless y expone la sesion mediante `wayvnc` en el puerto `5900`, permitiendo conectar cualquier tablet o cliente VNC como monitor extendido.
-
-### 6. Navidrome, Smart Radio y Handoff Multimedia
-
-- **Radio inteligente estilo Siri:** Al pedir *"pon una cancion de [artista]"* o *"reproduce [titulo]"*, Jota consulta la API Subsonic de Navidrome (`/rest/search3.view` y `/rest/getRandomSongs.view`) y construye una cola dinamica con pistas similares o del mismo genero.
-- **Handoff al movil:** Al decir *"pasa la musica al movil"*, Jota pausa la reproduccion local en el PC, guarda la cola en el servidor y notifica a la app de Android con la URL directa y la posicion exacta en milisegundos para continuar la escucha sin interrupciones.
-- **Marcar favorita:** Al decir *"marca esta cancion como favorita"*, Jota marca la pista en reproduccion en la base de datos de Navidrome via `/rest/star.view`.
-- **Enviar musica a la tele:** El comando *"pon la musica en la tele"* transmite el flujo de audio de la pista activa a la television mediante `catt`.
-
-### 7. Jota Bridge y Vinculacion Android
-
-El servicio `jota-bridge` expone un servidor FastAPI y WebSocket en el puerto `8765`:
-- **Descubrimiento automatico mDNS:** Anuncia el servicio en la red local (`_jota-bridge._tcp.local.`) para que la app de Android se conecte sin configurar IPs manualmente.
-- **ADB Reverse automatico:** Si el telefono se conecta por cable USB, ejecuta `adb reverse tcp:8765 tcp:8765`, permitiendo comunicacion local inmediata a traves de `127.0.0.1:8765`.
-- **Sincronizacion bidireccional:**
-  - Control de linterna, timbrado de localizacion y nivel de bateria del telefono.
-  - Pausa automatica de la musica del PC al recibir una llamada telefonica en Android.
-  - Sincronizacion universal del portapapeles entre el PC y el movil.
-  - Notificacion multimedia en Android con `MediaSession` y `Notification.MediaStyle`.
-
-### 8. Menu Contextual de Dolphin (KDE Service Menu)
-
-Instalado en `~/.local/share/kio/servicemenus/jota_send_to_phone.desktop`:
-- Al hacer clic derecho sobre cualquier archivo o seleccion en Dolphin, aparece la opcion **"Enviar al movil con Jota"**.
-- El archivo se transfiere de forma segura a traves de la API del Bridge directamente al telefono y muestra una notificacion de escritorio.
+```
+                      ┌────────────────────────────────────────┐
+                      │            JOTA ECOSISTEMA             │
+                      └────────────────────────────────────────┘
+                                           │
+         ┌─────────────────────────────────┼─────────────────────────────────┐
+         │                                 │                                 │
+         ▼                                 ▼                                 ▼
+   [ Rama main ]                    [ Rama bridge ]                  [ Rama jota-hub ]
+ Modo 1: Solo PC                   Modo 2: PC + Movil               Modo 3: Homelab 24/7
+ • 100% offline local              • PC = Servidor puente           • Docker en servidor homelab
+ • 0 dependencias de red           • Vinculacion Android JotaLink   • Movil activo sin encender PC
+ • Tecla Copilot (evdev)           • Portapapeles bidireccional     • faster-whisper + Qwen 1.5B/0.5B
+ • whisper.cpp + Qwen local        • Capturas y control multimedia  • Music Assistant + Navidrome
+ • Orbe visual flotante Wayland    • Apagas PC = Movil desconecta   • Wake-on-LAN para encender PC
+```
 
 ---
 
-## Catalogo de Herramientas y Comandos
+### Modo 1: Solo PC (Standalone - Rama main)
 
-| Categoria | Ejemplos de Comandos por Voz | Herramienta Ejecutada |
-|---|---|---|
-| **Escenas** | "activa el modo cine", "modo trabajo", "buenas noches", "cuales son las escenas" | `trigger_scene`, `list_scenes` |
-| **Smart TV & Cast** | "manda esto a la tele", "pausa la tele", "abre netflix en la tele" | `cast_media`, `cast_control`, `launch_tv_app` |
-| **HDMI-CEC** | "enciende la tele", "apaga la tele", "cambia la entrada en la tele" | `cec_control` |
-| **Streaming** | "muestra la pantalla del movil", "conecta la tablet", "desconecta la tablet" | `open_phone_screen`, `tablet_display` |
-| **Navidrome** | "pon algo de Daft Punk", "marca esta cancion como favorita", "pasa la musica al movil" | `navidrome_play`, `favorite_song`, `media_handoff` |
-| **Volumen** | "sube el volumen", "baja el volumen", "volumen al 70%", "silencia el audio" | `volume_control` |
-| **Multimedia** | "pausa la musica", "reproduce", "siguiente cancion", "cancion anterior" | `media_control` |
-| **Ventanas** | "pantalla completa", "haz flotante esta ventana", "cierra firefox", "cierra esta ventana" | `window_action`, `close_window` |
-| **Escritorios** | "pasa al escritorio 2", "mueve la ventana al escritorio 3" | `switch_workspace`, `move_to_workspace` |
-| **Pantalla PC** | "captura pantalla", "muestrame la pantalla del pc", "que error sale en la terminal" | `screenshot`, `analyze_screen` |
-| **Iluminacion** | "sube el brillo", "brillo al 50%", "activa el modo noche", "quita la luz nocturna" | `brightness_control`, `night_mode_control` |
-| **DevOps** | "que proceso usa el puerto 8080", "libera el puerto 3000", "contenedores activos", "top ram", "estado del repo" | `port_action`, `container_action`, `process_monitor`, `git_status` |
-| **Movil** | "donde esta mi movil", "enciende la linterna del movil", "manda la url al movil" | `phone_control`, `phone_send_url` |
-| **Sistema** | "bloquea el pc", "que hora es", "que tiempo hace en Madrid", "bateria del pc" | `lock_pc`, `get_current_time`, `get_weather`, `get_pc_battery` |
+Este es el modo base original de Jota. Esta pensado para usuarios que solo quieren un asistente de escritorio inteligente en su equipo con Linux.
 
----
-
-## Requisitos del Sistema
-
-- **Sistema Operativo:** Fedora Linux 40+ (o distribuciones equivalentes basadas en Linux y Wayland).
-- **Entorno de Escritorio:** Hyprland (Wayland compositor).
-- **Audio:** PipeWire con WirePlumber.
-- **Python:** 3.11 o superior.
-- **Paquetes del sistema (instalables via dnf):**
-  - Multimedia y Wayland: `grim`, `slurp`, `wl-clipboard`, `playerctl`, `brightnessctl`
-  - Streaming y TV: `scrcpy`, `android-tools` (adb), `cec-client` (libcec), `wayvnc`
-  - Filtro azul: `hyprsunset`
-  - Red y utilidades: `socat`, `git`, `curl`
-- **Permisos de entrada:** El usuario debe pertenecer al grupo `input` para leer eventos de la tecla Copilot sin privilegios root:
+- **Como funciona:**
+  - Pulsas la tecla **Copilot** (o la tecla configurada) en tu teclado físico.
+  - Mantienes pulsada la tecla mientras hablas; al soltarla, el motor local **whisper.cpp** transcribe tu voz.
+  - El modelo local **Qwen2.5-1.5B** (o 0.6B) deduce la intencion y ejecuta la orden sobre tu entorno Hyprland/Wayland (ajustar volumen con WirePlumber, lanzar aplicaciones, fijar temporizadores, consultar notas, hora o clima).
+  - El motor local **piper-tts** sintetiza la respuesta y la emite por los altavoces de tu ordenador.
+  - Un **orbe flotante** translucido en Wayland proporciona feedback visual instantaneo (escuchando, pensando, hablando).
+- **Ventajas:**
+  - 100% privado y seguro (cero telemetria, cero peticiones salientes a internet).
+  - Tiempos de respuesta ultra-rapidos (<1 segundo).
+  - No consume recursos en ningun otro equipo de la red.
+- **Instalacion:**
   ```bash
-  sudo usermod -aG input $USER
+  git checkout main
+  bash install.sh --mode=standalone
   ```
 
 ---
 
-## Instalacion Paso a Paso
+### Modo 2: PC + Movil (Bridge - Rama bridge)
 
-### 1. Clonar el repositorio
+Este modo anade un servidor puente de comunicacion local en tu PC para enlazar tu smartphone Android mediante la aplicacion nativa **JotaLink**.
 
+- **Como funciona:**
+  - Tu propio PC ejecuta el servicio `jota-bridge` en segundo plano, abriendo un puerto local (`8765`).
+  - La app Android JotaLink se conecta a tu PC mediante **cable USB** (ADB reverse, cero latencia), **red Wi-Fi local** o a traves de **Tailscale**.
+  - **Portapapeles universal bidireccional:** Copias un texto o enlace en el movil y se copia de inmediato en el portapapeles de tu PC; copias en el PC y aparece en el movil.
+  - **Capturas de pantalla en remoto:** Visualiza y guarda en la galeria de tu movil capturas de las pantallas de tu PC en tiempo real.
+  - **Control Multimedia MPRIS:** Pausa, reanuda o cambia de cancion en el PC desde las notificaciones o la interfaz del movil.
+  - **Microfono remoto:** Puedes pulsar el boton de voz en la app del movil para hablarle a Jota y que ejecute ordenes en tu PC.
+- **Limitacion:**
+  - Dado que tu PC es el host del servicio, si apagas el PC o lo pones en suspension, la aplicacion movil perdera la conexion.
+- **Instalacion:**
+  ```bash
+  git checkout bridge
+  bash install.sh --mode=bridge
+  ```
+
+---
+
+### Modo 3: Servidor Homelab 24/7 (Hub Docker - Rama jota-hub)
+
+Este modo traslada el cerebro central de Jota a un contenedor Docker aislado dentro de tu servidor homelab (ej. HP EliteDesk, Intel NUC, Raspberry Pi o NAS).
+
+- **Como funciona:**
+  - El contenedor `jota-hub` corre las 24 horas del dia en el servidor.
+  - Cuenta con un motor de transcripcion optimizado para CPU multinucleo (**faster-whisper** con cuantizacion `int8`) y el modelo **Qwen2.5-1.5B** (o `0.5B` para maxima ligereza).
+  - Tu telefono Android (JotaLink) se conecta directamente al servidor Hub (por Tailscale `100.x.y.z:8765` con fallback automatico a LAN `192.168.1.100:8765`).
+  - **Independencia del PC:** Puedes hablarle a Jota desde la cama, la cocina o fuera de casa sin necesidad de que tu PC de escritorio este encendido.
+  - **Control del Homelab:** Puedes consultar el estado de los contenedores Docker, controlar la reproduccion multiroom en **Music Assistant**, buscar pistas en **Navidrome** o consultar **Home Assistant**.
+  - **Encendido remoto del PC:** Si necesitas tu ordenador, solo tienes que decirle a Jota desde el movil: *"Despierta el PC"*; Jota Hub emitira un paquete magico Wake-on-LAN hacia la tarjeta de red de tu PC para encenderlo inmediatamente.
+- **Instalacion en el Servidor:**
+  ```bash
+  git checkout jota-hub
+  bash install.sh --mode=hub
+  ```
+
+---
+
+## Tabla Comparativa de Modos
+
+| Caracteristica | Modo 1: Standalone (`main`) | Modo 2: Bridge (`bridge`) | Modo 3: Hub Homelab (`jota-hub`) |
+|---|---|---|---|
+| **Dispositivos soportados** | Solo PC | PC + Smartphone Android | PC + Smartphone Android + Homelab |
+| **Requiere servidor externo?** | No | No (el PC es el host) | Si (contenedor Docker en servidor) |
+| **Funciona con el PC apagado?** | No | No | Si (24/7 desde el movil) |
+| **Motor STT (Voz a texto)** | `whisper.cpp` nativo | `whisper.cpp` nativo | `faster-whisper` (CTranslate2 int8) |
+| **Motor LLM (Inferencia)** | Qwen 2.5 1.5B / 0.6B | Qwen 2.5 1.5B / 0.6B | Qwen 2.5 1.5B / 0.5B (GGUF) |
+| **Sintesis TTS (Texto a voz)** | `piper-tts` por altavoces PC | `piper-tts` (PC y streaming movil) | `piper-tts` / streaming de audio |
+| **Portapapeles Universal** | No aplicable | Si (Bidireccional PC <-> Movil) | Sincronizable via Bridge |
+| **Capturas remotas de pantalla** | No aplicable | Si (Galeria Android en directo) | Via cliente PC conectado |
+| **Transferencia Music Assistant** | Local | Si (PC <-> Movil) | Si (Servidor central 24/7) |
+| **Encendido por Wake-on-LAN** | No aplicable | No aplicable | Si (Despierta el PC desde el movil) |
+| **Consumo de recursos** | Puntual (solo al pulsar tecla) | Bajo en reposo (~30MB) | Constante acotado (~1.2GB RAM en server) |
+
+---
+
+## Instalador Automatizado Unificado
+
+El repositorio incluye el script [`install.sh`](file:///home/jrodriiguezg/Documentos/Proyectos/hyper/jota/install.sh), que automatiza la resolucion de paquetes del sistema, grupos de usuario, compilacion de binarios, descarga de modelos cuantizados y configuracion de servicios systemd o contenedores Docker.
+
+### 1. Ejecucion interactiva con menu guiado
 ```bash
-git clone git@github.com:jrodriiguezg/jota.git
-cd jota
-git checkout bridge
+bash install.sh
 ```
 
-### 2. Ejecutar instalacion automatica
+El script te preguntara que modo deseas instalar:
+```
+Selecciona el modo de instalacion:
+  1) Solo PC (Standalone)   - 100% offline en tu PC, sin red ni servidor.
+  2) PC + Movil (Bridge)    - Tu PC actua de puente para la app Android.
+  3) Servidor Homelab (Hub) - Contenedor Docker 24/7 en servidor homelab.
 
-El script `setup.sh` prepara el entorno virtual, compila `whisper-cli` y descarga los modelos iniciales:
-
-```bash
-bash setup.sh
+Opcion [1-3]:
 ```
 
-### 3. Instalar herramientas de streaming y cast
+### 2. Ejecucion desatendida por flags
 
-Dentro del entorno virtual, instala las dependencias de emision:
+- **Instalar Modo 1 (Solo PC):**
+  ```bash
+  bash install.sh --mode=standalone
+  ```
 
-```bash
-source .venv/bin/activate
-pip install catt pychromecast pyyaml
+- **Instalar Modo 2 (PC + Movil):**
+  ```bash
+  bash install.sh --mode=bridge
+  ```
+
+- **Instalar Modo 3 (Servidor Homelab / Docker Hub):**
+  ```bash
+  bash install.sh --mode=hub
+  ```
+
+---
+
+## Arquitectura Tecnica
+
 ```
-
-Instala las utilidades complementarias del sistema si deseas soporte para streaming y televisor:
-
-```bash
-sudo dnf install -y scrcpy wayvnc libcec
-```
-
-### 4. Descargar el modelo Qwen2.5-1.5B (Recomendado)
-
-Si no lo tienes en tu directorio local de modelos:
-
-```bash
-mkdir -p ~/.local/share/jota/models/qwen
-# Descarga directa del archivo GGUF (aprox. 1.1 GB):
-curl -L -o ~/.local/share/jota/models/qwen/qwen2.5-1.5b-instruct-q4_k_m.gguf \
-  https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
+ +---------------------------------------------------------------------------------+
+ |                              DISPOSITIVO DE ENTRADA                             |
+ |   Tecla Copilot (PC / evdev)    o    Boton de Voz en Android (JotaLink / WS)    |
+ +---------------------------------------------------------------------------------+
+                                          |
+                                          v
+ +---------------------------------------------------------------------------------+
+ |                           RECONOCIMIENTO DE VOZ (STT)                           |
+ |          whisper.cpp (ggml-small.bin)   o   faster-whisper (CPU int8)           |
+ +---------------------------------------------------------------------------------+
+                                          |
+                                          v
+ +---------------------------------------------------------------------------------+
+ |                          ENRUTADOR HIBRIDO DE INTENCIONES                       |
+ |    1. Fast Intents Regex (<1ms, 0% CPU): Volumen, Media, Tiempo, Temporizadores |
+ |    2. LLM Tool Calling (Qwen2.5-1.5B Instruct en llama-cpp-python)              |
+ +---------------------------------------------------------------------------------+
+                                          |
+                                          v
+ +---------------------------------------------------------------------------------+
+ |                            EJECUCION DE HERRAMIENTAS                            |
+ |  Escritorio: hyprctl, wpctl, playerctl, grim, scrcpy, dolphin, wl-copy          |
+ |  Homelab: Music Assistant API, Navidrome API, Docker Socket, Wake-on-LAN        |
+ +---------------------------------------------------------------------------------+
+                                          |
+                                          v
+ +---------------------------------------------------------------------------------+
+ |                           RESPUESTA HABLADA (TTS) Y UI                          |
+ |  Audio: piper-tts (es_ES-sharvard-medium) -> Altavoces PC o Streaming a Movil   |
+ |  Visual: Orbe Wayland flotante (GTK Layer Shell) o Notificacion en JotaLink     |
+ +---------------------------------------------------------------------------------+
 ```
 
 ---
 
-## Configuracion
+## Configuracion de cada Modo
 
-### Dispositivos Multi-Pantalla ([`jota/config.py`](file:///home/jrodriiguezg/Documentos/Proyectos/hyper/jota/jota/config.py))
+### Configuracion del PC (`jota/config.py`)
 
-Edita los alias de tus dispositivos en la variable `DEVICES`:
+Puedes personalizar el comportamiento en tu PC editando [`jota/config.py`](file:///home/jrodriiguezg/Documentos/Proyectos/hyper/jota/jota/config.py) o mediante variables de entorno:
 
-```python
-DEVICES = {
-    "tele": {"name": "Android TV Salón", "type": "cast", "adb": "192.168.1.50:5555"},
-    "television": {"name": "Android TV Salón", "type": "cast", "adb": "192.168.1.50:5555"},
-    "tablet": {"name": "Tablet", "type": "vnc", "host": "192.168.1.180"},
-    "movil": {"name": "Teléfono", "type": "adb", "serial": "tu_serial_adb"},
-}
-```
+| Variable | Valor por defecto | Descripcion |
+|---|---|---|
+| `JOTA_LLM_PROFILE` | `lightweight` | Perfil de modelo (`lightweight` para 1.5B/0.5B, `quality` para 3B/7B). |
+| `JOTA_LLM_CTX` | `4096` | Tamano de ventana de contexto en tokens. |
+| `JOTA_LLM_THREADS` | `4` | Hilos de CPU asignados a la inferencia (evita saturar la CPU). |
+| `JOTA_STT_ENGINE` | `auto` | Motor STT (`auto`, `whisper_cli` o `faster_whisper`). |
+| `JOTA_ORB_ENABLED` | `true` | Habilitar orbe flotante en Wayland. |
+| `JOTA_ORB_AUTO_HIDE` | `true` | Ocultar automaticamente el orbe cuando este en reposo. |
+| `JOTA_HANDSFREE` | `false` | Escucha manos libres continua con VAD (desactivada por defecto). |
 
-### Escenas Personalizadas (`~/.config/jota/scenes.yaml`)
+### Configuracion del Bridge (`bridge/config.py`)
 
-Puedes modificar o anadir cualquier escena YAML con secuencias de herramientas:
+Ajustes para la exposicion de la API y canal WebSocket en [`bridge/config.py`](file:///home/jrodriiguezg/Documentos/Proyectos/hyper/jota/bridge/config.py):
+
+| Variable | Valor por defecto | Descripcion |
+|---|---|---|
+| `JOTA_BRIDGE_HOST` | `0.0.0.0` | Direccion de escucha (accesible por LAN y Tailscale). |
+| `JOTA_BRIDGE_PORT` | `8765` | Puerto TCP de comunicacion. |
+| `JOTA_BRIDGE_API_KEY` | `jota-secret-tailscale-key` | Token de autenticacion para clientes remotos. |
+| `JOTA_BRIDGE_MDNS` | `true` | Anuncio automatico mDNS / ZeroConf en la red local. |
+| `JOTA_BRIDGE_AUTO_ADB` | `true` | Configuracion automatica de `adb reverse` al conectar cable USB. |
+
+### Configuracion de Jota Hub (`compose.yaml`)
+
+El archivo [`docker/jota-hub/compose.yaml`](file:///home/jrodriiguezg/Documentos/Proyectos/hyper/jota/docker/jota-hub/compose.yaml) define el despliegue contenerizado:
 
 ```yaml
-scenes:
-  modo_lectura:
-    description: "Configuracion de bajo contraste para lectura prolongada"
-    actions:
-      - tool: brightness_control
-        args: { percent: 40 }
-      - tool: night_mode_control
-        args: { action: on }
+services:
+  jota-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: jota-hub:latest
+    container_name: jota-hub
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - JOTA_BRIDGE_HOST=0.0.0.0
+      - JOTA_BRIDGE_PORT=8765
+      - JOTA_BRIDGE_API_KEY=jota-secret-tailscale-key
+      - JOTA_STT_ENGINE=faster_whisper
+      - JOTA_FASTER_WHISPER_MODEL=base
+      - JOTA_FASTER_WHISPER_COMPUTE=int8
+      - JOTA_LLM_MODEL=/app/models/qwen/qwen2.5-1.5b-instruct-q4_k_m.gguf
+      - JOTA_LLM_CTX=4096
+      - JOTA_LLM_THREADS=4
+      - JOTA_ORB_ENABLED=false
+      - JOTA_TRAY=false
+      - MUSIC_ASSISTANT_URL=http://100.x.y.z:8095
+      - MUSIC_ASSISTANT_TOKEN=tu_token_larga_duracion
+      - NAVIDROME_URL=https://navidrome.tudominio.link
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 ```
 
-### Servidor Navidrome / Subsonic
+### Configuracion de la App Android JotaLink
 
-Configura tus credenciales de Navidrome mediante variables de entorno o editando `jota/config.py`:
+La aplicacion Android (`bridge/android`) incluye soporte para conmutacion por error (**Failover automatico**):
 
-```bash
-export NAVIDROME_URL="https://tu-servidor-navidrome.com"
-export NAVIDROME_USER="tu_usuario"
-export NAVIDROME_TOKEN="tu_token_subsonic"
-export NAVIDROME_SALT="tu_salt_subsonic"
-```
+1. **Abre JotaLink** en tu dispositivo.
+2. Despliega el panel de **Conexion y Red**.
+3. Configura las dos URLs disponibles:
+   - **Server URL Principal (Tailscale / Remoto):** `http://100.x.y.z:8765`
+   - **Fallback Server URL (LAN / Alternativo):** `http://192.168.1.100:8765`
+4. Pulsa **Guardar y Conectar**.
+
+Si sales de casa o la red local cambia, la aplicacion intentara comunicarse con la IP primaria y, ante cualquier fallo de red o tiempo de espera, conmutara de forma transparente a la IP de fallback sin interrumpir tus solicitudes.
 
 ---
 
 ## Ejecucion como Servicio Systemd
 
-Para que Jota arranque automaticamente con tu sesion de usuario de Linux y mantenga sus registros centralizados en `journalctl`, configuralo como un servicio de usuario de systemd.
+Para que Jota arranque automaticamente al iniciar tu equipo de escritorio y sobreviva a cierres de terminal:
 
-### 1. Crear el archivo del servicio
-
-Crea el archivo `~/.config/systemd/user/jota.service`:
+### 1. Archivo de unidad de usuario (`~/.config/systemd/user/jota.service`)
 
 ```ini
 [Unit]
@@ -259,8 +323,8 @@ RestartSec=3
 KillMode=control-group
 Environment=PYTHONUNBUFFERED=1
 Environment=PATH=/home/jrodriiguezg/Documentos/Proyectos/hyper/jota/.venv/bin:/home/jrodriiguezg/.local/bin:/usr/local/bin:/usr/bin:/bin
+PassEnvironment=WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_RUNTIME_DIR
 
-# Gestion de registros en journalctl
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=jota
@@ -269,54 +333,40 @@ SyslogIdentifier=jota
 WantedBy=default.target
 ```
 
-### 2. Recargar y activar el servicio
-
+### 2. Habilitar persistencia de usuario y activar servicio
 ```bash
+# Permitir que los servicios de usuario arranquen al encender el PC
+loginctl enable-linger $USER
+
+# Recargar daemon y activar
 systemctl --user daemon-reload
 systemctl --user enable --now jota.service
-```
-
-### 3. Comprobar el estado del servicio
-
-```bash
-systemctl --user status jota.service
 ```
 
 ---
 
 ## Consultar Registros con Journalctl
 
-Todos los registros de ejecucion, transcripciones y acciones de herramientas se almacenan de forma estructurada en journalctl.
+```bash
+# Seguir registros en tiempo real
+journalctl --user -u jota -f
 
-- **Seguir logs en tiempo real:**
-  ```bash
-  journalctl --user -u jota -f
-  ```
+# Ver ultimas 50 lineas estructuradas
+journalctl --user -u jota -n 50 --no-pager
 
-- **Ver los ultimos 50 mensajes de registro:**
-  ```bash
-  journalctl --user -u jota -n 50 --no-pager
-  ```
-
-- **Filtrar por errores:**
-  ```bash
-  journalctl --user -u jota -p err --no-pager
-  ```
+# Filtrar unicamente errores
+journalctl --user -u jota -p err --no-pager
+```
 
 ---
 
 ## Bateria de Pruebas
 
-El proyecto cuenta con una cobertura integral de pruebas unitarias y de integracion:
+Para validar el funcionamiento del conjunto de herramientas y el enrutador:
 
 ```bash
 source .venv/bin/activate
 pytest tests/ -v
-```
-
-Comprobar estilo y formato de codigo:
-
-```bash
 ruff check .
 ```
 
@@ -324,25 +374,19 @@ ruff check .
 
 ## Solucion de Problemas
 
-### Error de permisos al leer eventos de teclado (`/dev/input/*`)
-Asegurate de que tu usuario pertenece al grupo `input`:
+### 1. Error de permisos en teclado (`/dev/input/*`)
+Si la tecla Copilot no responde, agrega tu usuario al grupo `input`:
 ```bash
 sudo usermod -aG input $USER
-# Cierra sesion y vuelve a iniciar sesion para aplicar el grupo
+# Cierra sesion y vuelve a iniciarla para aplicar el cambio
 ```
 
-### Transcripciones continuas sin hablar (ruido ambiental)
-El modo manos libres continuo se encuentra desactivado por defecto (`HANDSFREE_ENABLED = False`). Jota solo captura audio mientras mantienes pulsada la tecla Copilot. Si activas manos libres con `JOTA_HANDSFREE=true`, incrementa el umbral de sensibilidad VAD:
+### 2. El orbe visual no inicia en Wayland
+Asegurate de que la sesion grafica exporta `WAYLAND_DISPLAY` hacia systemd:
 ```bash
-export JOTA_VAD_THRESHOLD=0.035
+systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP
 ```
+El cliente de Jota detecta automaticamente los sockets activos en `/run/user/$UID/wayland-*`.
 
-### Las aplicaciones abiertas se cierran al detener Jota
-Todas las aplicaciones lanzadas por Jota (`open_app`, `scrcpy`, `catt`) se ejecutan como procesos independientes desacoplados (`start_new_session=True`). Cerrar o reiniciar el servicio de Jota no interrumpe tus programas abiertos.
-
-### Error al conectar por ADB al movil
-Si el movil esta conectado por cable USB, comprueba que aparece como autorizado:
-```bash
-adb devices
-```
-Si aparece como `unauthorized`, acepta el dialogo de autorizacion en la pantalla del telefono. En dispositivos Xiaomi/HyperOS, habilita tambien **"Instalar via USB"** y **"Depuracion USB (ajustes de seguridad)"** en Opciones de desarrollador.
+### 3. Jota Hub en Docker no puede conectarse a Music Assistant o Navidrome
+Verifica que las variables de entorno de red apunten a la IP accesible desde el contenedor (por ejemplo, la IP de Tailscale del host `100.x.y.z` o la IP de red local `192.168.1.100`).
