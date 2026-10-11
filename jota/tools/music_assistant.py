@@ -86,11 +86,12 @@ async def _send_mass_command(
 
             await ws.send(json.dumps(cmd_payload))
 
-            # Esperar respuesta correspondiente
+            # Esperar respuesta correspondiente filtrando eventos de difusion
             while True:
                 resp_raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
                 resp = json.loads(resp_raw)
-                if resp.get("message_id") == msg_id or "result" in resp or "error_code" in resp:
+                m_id = resp.get("message_id")
+                if m_id is not None and (m_id == msg_id or str(m_id) == str(msg_id)):
                     if resp.get("error_code"):
                         err_msg = resp.get("details") or "Error en Music Assistant"
                         return False, err_msg
@@ -118,8 +119,14 @@ def _resolve_player_id(target_alias: str, players: list[dict[str, Any]]) -> str 
     """Resuelve un alias ('movil', 'pc', 'tele') al ID del reproductor correspondiente."""
     target_clean = target_alias.lower().strip()
     phone_keywords = ("movil", "móvil", "telefono", "teléfono", "xiaomi", "celular", "phone")
-    pc_keywords = ("pc", "escritorio", "computadora", "ordenador", "fedora", "desktop")
-    tv_keywords = ("tele", "televisión", "television", "tv", "salon", "salón", "chromecast")
+    pc_keywords = (
+        "pc", "escritorio", "computadora", "ordenador", "fedora", "desktop",
+        "chrome", "linux", "web", "monitor",
+    )
+    tv_keywords = (
+        "tele", "televisión", "television", "tv", "salon", "salón", "chromecast",
+        "50pus", "philips", "pus",
+    )
 
     for p in players:
         p_name = p.get("name", "").lower()
@@ -131,11 +138,17 @@ def _resolve_player_id(target_alias: str, players: list[dict[str, Any]]) -> str 
                 return p_id
 
         if any(k in target_clean for k in pc_keywords):
-            if any(k in p_name for k in pc_keywords):
+            if any(k in p_name for k in (
+                "pc", "escritorio", "computadora", "ordenador", "fedora",
+                "desktop", "chrome", "linux", "web", "monitor",
+            )):
                 return p_id
 
         if any(k in target_clean for k in tv_keywords):
-            if any(k in p_name for k in tv_keywords):
+            if any(k in p_name for k in (
+                "tele", "televisión", "television", "tv", "salon", "salón",
+                "chromecast", "50pus", "philips", "pus",
+            )):
                 return p_id
 
     # Fallback por coincidencia parcial en nombre
@@ -153,13 +166,11 @@ def transfer_music(source_alias: str = "pc", target_alias: str = "movil") -> tup
     """
     token = _load_auth_token()
     if not token:
-        # Informar de necesidad de token y derivar a fallback si aplica
         hint = (
             "Music Assistant detectado en elitedesk. Configura tu token en "
             "~/.config/jota/mass.json para autorizar el control."
         )
         logger.info(hint)
-        # Intentar fallback via handoff nativo de Navidrome/Bridge
         from jota.tools.navidrome import transfer_playback_to_phone
         fb_ok, fb_msg = transfer_playback_to_phone()
         if fb_ok:
@@ -172,12 +183,18 @@ def transfer_music(source_alias: str = "pc", target_alias: str = "movil") -> tup
 
     target_id = _resolve_player_id(target_alias, players)
     if not target_id:
+        # Fallback a Navidrome si el destino es el movil
+        phone_keywords = ("movil", "móvil", "telefono", "teléfono", "celular")
+        if any(k in target_alias.lower() for k in phone_keywords):
+            from jota.tools.navidrome import transfer_playback_to_phone
+            fb_ok, fb_msg = transfer_playback_to_phone()
+            if fb_ok:
+                return True, f"Musica transferida a tu movil via Navidrome ({fb_msg})."
         return False, f"No se encontro el reproductor destino '{target_alias}' en Music Assistant."
 
     # Encontrar reproductor fuente activo
     source_id = _resolve_player_id(source_alias, players)
     if not source_id:
-        # Buscar el reproductor que este actualmente reproduciendo
         for p in players:
             if p.get("state") == "playing":
                 source_id = p.get("player_id")
@@ -191,17 +208,26 @@ def transfer_music(source_alias: str = "pc", target_alias: str = "movil") -> tup
 
     success, res = asyncio.run(
         _send_mass_command(
-            "players/cmd_transfer",
+            "player_queues/transfer",
             args={
-                "source_player_id": source_id,
-                "target_player_id": target_id,
-                "auto_play": True,
+                "source_queue_id": source_id,
+                "target_queue_id": target_id,
             },
         )
     )
 
     if success:
         return True, f"Musica transferida a {target_alias} en Music Assistant."
+
+    # Si Music Assistant falla por disponibilidad, fallback transparente a Navidrome
+    phone_keywords = ("movil", "móvil", "telefono", "teléfono", "celular")
+    if any(k in target_alias.lower() for k in phone_keywords):
+        logger.info("Transferencia fallida en Music Assistant (%s); usando Navidrome.", res)
+        from jota.tools.navidrome import transfer_playback_to_phone
+        fb_ok, fb_msg = transfer_playback_to_phone()
+        if fb_ok:
+            return True, f"Musica transferida al movil ({fb_msg})."
+
     return False, f"No se pudo transferir en Music Assistant: {res}"
 
 
@@ -209,38 +235,52 @@ def play_music_assistant(query: str, target_alias: str = "pc") -> tuple[bool, st
     """Inicia la reproduccion de un artista, cancion o radio en Music Assistant."""
     token = _load_auth_token()
     if not token:
-        # Fallback a reproduccion directa con cola inteligente de Navidrome
         from jota.tools.navidrome import play_navidrome_smart_radio
         return play_navidrome_smart_radio(query)
 
     players = get_players()
     target_id = _resolve_player_id(target_alias, players) if players else None
+    if not target_id and players:
+        target_id = players[0].get("player_id")
 
-    # Enviar comando de busqueda o reproduccion
-    args: dict[str, Any] = {"media": query}
-    if target_id:
-        args["player_id"] = target_id
+    if not target_id:
+        from jota.tools.navidrome import play_navidrome_smart_radio
+        return play_navidrome_smart_radio(query)
 
-    success, res = asyncio.run(
-        _send_mass_command(
-            "players/cmd_play_media",
-            args=args,
-        )
+    # Intentar buscar item especifico (pista, artista, album)
+    media_item: str = query
+    success, s_res = asyncio.run(
+        _send_mass_command("music/search", args={"search_query": query, "limit": 1})
     )
+    if success and isinstance(s_res, dict):
+        tracks = s_res.get("tracks") or []
+        artists = s_res.get("artists") or []
+        albums = s_res.get("albums") or []
+        if tracks:
+            media_item = tracks[0].get("uri") or query
+        elif artists:
+            media_item = artists[0].get("uri") or query
+        elif albums:
+            media_item = albums[0].get("uri") or query
 
+    args = {"queue_id": target_id, "media": media_item}
+    success, res = asyncio.run(_send_mass_command("player_queues/play_media", args=args))
     if success:
-        return True, f"Reproduciendo '{query}' en Music Assistant."
-    return False, f"Error reproduciendo en Music Assistant: {res}"
+        return True, f"Reproduciendo '{query}' en {target_alias} via Music Assistant."
+
+    # Fallback con Navidrome
+    from jota.tools.navidrome import play_navidrome_smart_radio
+    return play_navidrome_smart_radio(query)
 
 
 def media_control_mass(action: str, target_alias: str = "") -> tuple[bool, str]:
     """Controla pausa, reanudacion o pista siguiente en Music Assistant."""
     cmd_map = {
-        "pause": "players/cmd_pause",
-        "play": "players/cmd_play",
-        "resume": "players/cmd_play",
-        "next": "players/cmd_next",
-        "previous": "players/cmd_previous",
+        "pause": "player_queues/pause",
+        "play": "player_queues/play",
+        "resume": "player_queues/resume",
+        "next": "player_queues/next",
+        "previous": "player_queues/previous",
     }
     cmd = cmd_map.get(action.lower().strip())
     if not cmd:
@@ -248,8 +288,15 @@ def media_control_mass(action: str, target_alias: str = "") -> tuple[bool, str]:
 
     players = get_players()
     target_id = _resolve_player_id(target_alias, players) if (target_alias and players) else None
-    args = {"player_id": target_id} if target_id else None
+    if not target_id and players:
+        for p in players:
+            if p.get("state") == "playing":
+                target_id = p.get("player_id")
+                break
+        if not target_id:
+            target_id = players[0].get("player_id")
 
+    args = {"queue_id": target_id} if target_id else None
     success, res = asyncio.run(_send_mass_command(cmd, args=args))
     if success:
         return True, f"Comando '{action}' enviado a Music Assistant."
