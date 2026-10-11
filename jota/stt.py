@@ -1,4 +1,4 @@
-"""STT: transcripcion de audio usando el binario nativo de whisper.cpp (whisper-cli)."""
+"""STT: transcripcion de audio usando whisper.cpp (whisper-cli) o faster-whisper."""
 
 import logging
 import os
@@ -7,7 +7,10 @@ import subprocess
 from pathlib import Path
 
 from jota.config import (
+    FASTER_WHISPER_COMPUTE_TYPE,
+    FASTER_WHISPER_MODEL,
     REQUIRE_WAKE_WORD,
+    STT_ENGINE,
     WAKE_WORDS,
     WHISPER_BIN,
     WHISPER_LANG,
@@ -16,12 +19,60 @@ from jota.config import (
 
 logger = logging.getLogger(__name__)
 
+_faster_whisper_model = None
 
-def transcribe(audio_path: Path) -> str | None:
-    """
-    Llama a whisper.cpp para transcribir el archivo de audio dado.
-    Devuelve el texto transcrito o None si hubo un error.
-    """
+
+def _get_faster_whisper_model():
+    global _faster_whisper_model
+    if _faster_whisper_model is None:
+        try:
+            from faster_whisper import WhisperModel
+
+            threads = min(8, os.cpu_count() or 4)
+            logger.info(
+                "Cargando faster-whisper (modelo=%s, compute=%s, threads=%d)...",
+                FASTER_WHISPER_MODEL,
+                FASTER_WHISPER_COMPUTE_TYPE,
+                threads,
+            )
+            _faster_whisper_model = WhisperModel(
+                FASTER_WHISPER_MODEL,
+                device="cpu",
+                compute_type=FASTER_WHISPER_COMPUTE_TYPE,
+                cpu_threads=threads,
+            )
+        except Exception as e:
+            logger.error("No se pudo cargar faster-whisper: %s", e)
+            return None
+    return _faster_whisper_model
+
+
+def _transcribe_faster_whisper(audio_path: Path) -> str | None:
+    model = _get_faster_whisper_model()
+    if model is None:
+        return None
+    try:
+        segments, _ = model.transcribe(
+            str(audio_path),
+            language=WHISPER_LANG,
+            beam_size=1,
+            vad_filter=True,
+        )
+        parts = [seg.text.strip() for seg in segments if seg.text.strip()]
+        raw_text = " ".join(parts).strip()
+        if raw_text:
+            if re.match(r"^\[[\w\s.-]+\]$", raw_text) or re.match(r"^\([\w\s.-]+\)$", raw_text):
+                logger.debug("Artefacto de silencio descartado: %r", raw_text)
+                return None
+            logger.info("Transcripcion (faster-whisper): %r", raw_text)
+            return raw_text
+        return None
+    except Exception as e:
+        logger.error("Error en faster-whisper: %s", e)
+        return None
+
+
+def _transcribe_whisper_cli(audio_path: Path) -> str | None:
     if not WHISPER_BIN.exists():
         raise FileNotFoundError(
             f"Binario de whisper-cli no encontrado en {WHISPER_BIN}.\n"
@@ -92,6 +143,26 @@ def transcribe(audio_path: Path) -> str | None:
         return None
     finally:
         txt_file.unlink(missing_ok=True)
+
+
+def transcribe(audio_path: Path) -> str | None:
+    """
+    Transcribe el audio usando el motor configurado (faster-whisper o whisper-cli).
+    Devuelve el texto transcrito o None si hubo un error.
+    """
+    if STT_ENGINE == "faster_whisper":
+        return _transcribe_faster_whisper(audio_path)
+
+    if STT_ENGINE == "whisper_cli":
+        return _transcribe_whisper_cli(audio_path)
+
+    # Modo automatico: usar faster-whisper si whisper-cli no esta instalado
+    if not WHISPER_BIN.exists():
+        result = _transcribe_faster_whisper(audio_path)
+        if result is not None:
+            return result
+
+    return _transcribe_whisper_cli(audio_path)
 
 
 def extract_wake_word(text: str) -> tuple[bool, str]:

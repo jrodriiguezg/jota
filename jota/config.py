@@ -10,7 +10,9 @@ from pathlib import Path
 # ── Rutas de modelos ─────────────────────────────────────────────────────────
 
 # Directorio raíz donde están los modelos
-MODELS_DIR = Path.home() / ".local" / "share" / "jota" / "models"
+MODELS_DIR = Path(
+    os.getenv("JOTA_MODELS_DIR", str(Path.home() / ".local" / "share" / "jota" / "models"))
+)
 
 # Whisper: ruta al binario de whisper.cpp
 # Nota: en versiones recientes el binario se llama whisper-cli (antes whisper-cpp)
@@ -24,6 +26,11 @@ WHISPER_BIN = (
 WHISPER_MODEL = MODELS_DIR / "whisper" / "ggml-small.bin"
 # Idioma de reconocimiento
 WHISPER_LANG = "es"
+
+# Motor STT: "auto", "whisper_cli", o "faster_whisper"
+STT_ENGINE = os.getenv("JOTA_STT_ENGINE", "auto").lower()
+FASTER_WHISPER_MODEL = os.getenv("JOTA_FASTER_WHISPER_MODEL", "base")
+FASTER_WHISPER_COMPUTE_TYPE = os.getenv("JOTA_FASTER_WHISPER_COMPUTE", "int8")
 
 # LLM: seleccion del modelo optimizado para consumo ligero y baja latencia
 def _resolve_llm_model() -> Path:
@@ -123,7 +130,7 @@ COPILOT_KEY_CODES = {0x00C1, 0x1D8, 193, 472}
 
 # ── Indicador Visual de Pantalla (Orbe Flotante Wayland) ─────────────────────
 
-ORB_ENABLED = True
+ORB_ENABLED = os.getenv("JOTA_ORB_ENABLED", "true").lower() in ("true", "1", "yes")
 ORB_SIZE = 140
 ORB_CORNER = "bottom_right"  # "bottom_right", "bottom_left", "top_right", "top_left"
 ORB_MARGIN_X = 28

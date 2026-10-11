@@ -54,9 +54,23 @@ class OrbClient:
         """Lanza el orbe en un subproceso independiente."""
         logger.info("Iniciando proceso del orbe visual de Jota...")
         try:
+            import glob
             import os
+
             python_bin = "/usr/bin/python3" if Path("/usr/bin/python3").exists() else sys.executable
             env = dict(os.environ)
+
+            # Auto-detectar Wayland display si no esta presente en las variables de entorno
+            if "WAYLAND_DISPLAY" not in env:
+                uid = os.getuid()
+                w_sockets = glob.glob(f"/run/user/{uid}/wayland-*")
+                for s in sorted(w_sockets):
+                    if not s.endswith(".lock"):
+                        env["WAYLAND_DISPLAY"] = os.path.basename(s)
+                        break
+            if "XDG_RUNTIME_DIR" not in env:
+                env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+
             project_root = str(Path(__file__).resolve().parent.parent.parent)
             curr_pp = env.get("PYTHONPATH", "")
             env["PYTHONPATH"] = f"{project_root}:{curr_pp}" if curr_pp else project_root

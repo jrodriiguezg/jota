@@ -1,0 +1,32 @@
+services:
+  jota-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: jota-hub:latest
+    container_name: jota-hub
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - JOTA_BRIDGE_HOST=0.0.0.0
+      - JOTA_BRIDGE_PORT=8765
+      - JOTA_BRIDGE_API_KEY=jota-secret-tailscale-key
+      - JOTA_STT_ENGINE=faster_whisper
+      - JOTA_FASTER_WHISPER_MODEL=base
+      - JOTA_FASTER_WHISPER_COMPUTE=int8
+      - JOTA_LLM_MODEL=/app/models/qwen/qwen2.5-1.5b-instruct-q4_k_m.gguf
+      - JOTA_LLM_CTX=4096
+      - JOTA_LLM_THREADS=4
+      - JOTA_ORB_ENABLED=false
+      - JOTA_TRAY=false
+      - MUSIC_ASSISTANT_URL=http://100.x.y.z:8095
+      - MUSIC_ASSISTANT_TOKEN=tu_token_larga_duracion
+      - NAVIDROME_URL=https://navidrome.ejemplo.local
+      - NAVIDROME_USER=admin
+      - NAVIDROME_SALT=tu_salt_navidrome
+      - NAVIDROME_TOKEN=tu_token_navidrome
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro

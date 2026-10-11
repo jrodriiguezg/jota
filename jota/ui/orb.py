@@ -540,6 +540,11 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
+    init_ok, _ = Gtk.init_check()
+    if not init_ok:
+        logger.warning("No se pudo inicializar GTK: display grafico no disponible.")
+        sys.exit(0)
+
     window = JotaOrbWindow()
     server = OrbSocketServer(window)
     server.start()

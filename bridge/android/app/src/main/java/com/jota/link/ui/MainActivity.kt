@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var prefs: SharedPreferences
 
     private var serverUrl by mutableStateOf("http://100.x.y.z:8765")
+    private var serverFallbackUrl by mutableStateOf("http://192.168.1.100:8765")
     private var apiKey by mutableStateOf("jota-secret-tailscale-key")
     private var deviceId by mutableStateOf("android_user")
 
@@ -86,10 +87,11 @@ class MainActivity : ComponentActivity() {
         prefs = getSharedPreferences("jota_link_prefs", Context.MODE_PRIVATE)
 
         serverUrl = prefs.getString("server_url", "http://100.x.y.z:8765") ?: "http://100.x.y.z:8765"
+        serverFallbackUrl = prefs.getString("server_fallback_url", "http://192.168.1.100:8765") ?: "http://192.168.1.100:8765"
         apiKey = prefs.getString("api_key", "jota-secret-tailscale-key") ?: "jota-secret-tailscale-key"
         deviceId = prefs.getString("device_id", "android_user") ?: "android_user"
 
-        bridgeClient = BridgeClient(this, serverUrl, apiKey, deviceId)
+        bridgeClient = BridgeClient(this, serverUrl, apiKey, deviceId, serverFallbackUrl)
 
         checkPermissions()
         handleIncomingIntent(intent)
@@ -147,6 +149,7 @@ class MainActivity : ComponentActivity() {
         val wakeWordPref = enableWakeWord ?: prefs.getBoolean("enable_wake_word", false)
         val intent = Intent(this, JotaBridgeService::class.java).apply {
             putExtra("baseUrl", serverUrl)
+            putExtra("fallbackUrl", serverFallbackUrl)
             putExtra("apiKey", apiKey)
             putExtra("deviceId", deviceId)
             putExtra("enableWakeWord", wakeWordPref)
@@ -154,13 +157,23 @@ class MainActivity : ComponentActivity() {
         startForegroundService(intent)
     }
 
-    private fun updateConnectionConfig(newUrl: String, newKey: String, newId: String, newMac: String? = null) {
+    private fun updateConnectionConfig(
+        newUrl: String,
+        newKey: String,
+        newId: String,
+        newFallbackUrl: String? = null,
+        newMac: String? = null
+    ) {
         serverUrl = newUrl.trim()
+        if (!newFallbackUrl.isNullOrBlank()) {
+            serverFallbackUrl = newFallbackUrl.trim()
+        }
         apiKey = newKey.trim()
         deviceId = newId.trim()
 
         prefs.edit().apply {
             putString("server_url", serverUrl)
+            putString("server_fallback_url", serverFallbackUrl)
             putString("api_key", apiKey)
             putString("device_id", deviceId)
             if (!newMac.isNullOrBlank()) {
@@ -170,7 +183,7 @@ class MainActivity : ComponentActivity() {
         }
 
         bridgeClient?.disconnect()
-        bridgeClient = BridgeClient(this, serverUrl, apiKey, deviceId)
+        bridgeClient = BridgeClient(this, serverUrl, apiKey, deviceId, serverFallbackUrl)
         startBridgeService()
 
         // Autodescubrir MAC del PC para Wake-on-LAN
@@ -223,7 +236,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleSharedText(text: String) {
         lifecycleScope.launch(Dispatchers.IO) {
-            val client = bridgeClient ?: BridgeClient(this@MainActivity, serverUrl, apiKey, deviceId)
+            val client = bridgeClient ?: BridgeClient(this@MainActivity, serverUrl, apiKey, deviceId, serverFallbackUrl)
             val isUrl = text.startsWith("http://") || text.startsWith("https://")
             if (isUrl) {
                 val (resUrl, msgUrl) = client.openUrlOnPc(text)
@@ -250,7 +263,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleSharedUri(uri: Uri) {
         lifecycleScope.launch(Dispatchers.IO) {
-            val client = bridgeClient ?: BridgeClient(this@MainActivity, serverUrl, apiKey, deviceId)
+            val client = bridgeClient ?: BridgeClient(this@MainActivity, serverUrl, apiKey, deviceId, serverFallbackUrl)
             var fileName = "archivo_compartido_${System.currentTimeMillis()}"
             try {
                 contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -302,6 +315,7 @@ class MainActivity : ComponentActivity() {
         var showSettings by remember { mutableStateOf(false) }
         var showHelpDialog by remember { mutableStateOf(false) }
         var inputUrl by remember { mutableStateOf(serverUrl) }
+        var inputFallbackUrl by remember { mutableStateOf(serverFallbackUrl) }
         var inputKey by remember { mutableStateOf(apiKey) }
         var inputId by remember { mutableStateOf(deviceId) }
         var isScanningMdns by remember { mutableStateOf(false) }
@@ -674,25 +688,28 @@ class MainActivity : ComponentActivity() {
                             }
 
                             // 2. Presets de Canales Rápidos
-                            Text("Canales Rápidos", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Presets de Servidor", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 listOf(
-                                    "Cable ADB" to "http://127.0.0.1:8765",
-                                    "USB Tether" to "http://192.168.42.1:8765",
-                                    "Bluetooth" to "http://192.168.44.1:8765"
-                                ).forEach { (label, url) ->
-                                    val isSelected = inputUrl == url
+                                    "Hub Tailscale" to ("http://100.x.y.z:8765" to "http://192.168.1.100:8765"),
+                                    "PC Local" to ("http://100.x.y.z:8765" to "http://192.168.1.100:8765"),
+                                    "USB Tether" to ("http://192.168.42.1:8765" to "http://127.0.0.1:8765")
+                                ).forEach { (label, urls) ->
+                                    val isSelected = inputUrl == urls.first
                                     FilledTonalButton(
-                                        onClick = { inputUrl = url },
+                                        onClick = {
+                                            inputUrl = urls.first
+                                            inputFallbackUrl = urls.second
+                                        },
                                         shape = CircleShape,
                                         colors = ButtonDefaults.filledTonalButtonColors(
                                             containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                                             contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                                         ),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         Text(label, fontSize = 10.sp, maxLines = 1)
@@ -703,7 +720,14 @@ class MainActivity : ComponentActivity() {
                             OutlinedTextField(
                                 value = inputUrl,
                                 onValueChange = { inputUrl = it },
-                                label = { Text("Server URL") },
+                                label = { Text("Server URL Principal (Tailscale / Remoto)") },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            OutlinedTextField(
+                                value = inputFallbackUrl,
+                                onValueChange = { inputFallbackUrl = it },
+                                label = { Text("Fallback Server URL (LAN / Alternativo)") },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(16.dp)
                             )
@@ -822,7 +846,7 @@ class MainActivity : ComponentActivity() {
 
                             Button(
                                 onClick = {
-                                    updateConnectionConfig(inputUrl, inputKey, inputId)
+                                    updateConnectionConfig(inputUrl, inputKey, inputId, inputFallbackUrl)
                                     showSettings = false
                                 },
                                 shape = CircleShape,
@@ -1698,14 +1722,16 @@ class MainActivity : ComponentActivity() {
                                     try {
                                         val json = JSONObject(qrJsonInput.trim())
                                         val url = json.optString("url", inputUrl)
+                                        val fallback = json.optString("fallback_url", inputFallbackUrl)
                                         val key = json.optString("api_key", inputKey)
                                         val mac = json.optString("mac", "")
                                         inputUrl = url
+                                        inputFallbackUrl = fallback
                                         inputKey = key
                                         if (mac.isNotEmpty()) {
                                             savedMac = mac
                                         }
-                                        updateConnectionConfig(url, key, inputId, mac)
+                                        updateConnectionConfig(url, key, inputId, fallback, mac)
                                         showQrPairingDialog = false
                                         showSettings = false
                                         Toast.makeText(this@MainActivity, "Vinculacion aplicada", Toast.LENGTH_SHORT).show()

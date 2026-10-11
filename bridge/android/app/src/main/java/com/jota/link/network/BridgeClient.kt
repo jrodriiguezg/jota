@@ -13,10 +13,14 @@ import java.util.concurrent.TimeUnit
 
 class BridgeClient(
     private val context: Context,
-    private val baseUrl: String,
+    val baseUrl: String,
     private val apiKey: String,
-    private val deviceId: String
+    private val deviceId: String,
+    val fallbackUrl: String = ""
 ) {
+    var activeBaseUrl: String = baseUrl
+        private set
+
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -24,6 +28,20 @@ class BridgeClient(
 
     private var webSocket: WebSocket? = null
     private var isConnected = false
+
+    private inline fun <T> executeWithFallback(action: (String) -> T): T {
+        return try {
+            action(activeBaseUrl)
+        } catch (e: java.io.IOException) {
+            if (fallbackUrl.isNotBlank()) {
+                val nextUrl = if (activeBaseUrl == baseUrl) fallbackUrl else baseUrl
+                activeBaseUrl = nextUrl
+                action(nextUrl)
+            } else {
+                throw e
+            }
+        }
+    }
 
     interface BridgeListener {
         fun onConnected()
@@ -42,7 +60,8 @@ class BridgeClient(
     var listener: BridgeListener? = null
 
     fun connectWebSocket() {
-        val wsBaseUrl = baseUrl.replace("http://", "ws://").replace("https://", "wss://")
+        val currentUrl = activeBaseUrl
+        val wsBaseUrl = currentUrl.replace("http://", "ws://").replace("https://", "wss://")
         val wsUrl = "$wsBaseUrl/ws/phone?token=$apiKey&device_id=$deviceId&model=Android_${android.os.Build.MODEL}"
 
         val request = Request.Builder()
@@ -127,6 +146,13 @@ class BridgeClient(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 isConnected = false
                 listener?.onDisconnected()
+                if (fallbackUrl.isNotBlank() && activeBaseUrl == baseUrl) {
+                    activeBaseUrl = fallbackUrl
+                    CoroutineScope(Dispatchers.IO).launch {
+                        delay(2000)
+                        connectWebSocket()
+                    }
+                }
             }
         })
     }
@@ -159,26 +185,28 @@ class BridgeClient(
         generateAudio: Boolean = true,
         playOnPc: Boolean = true
     ): JSONObject = withContext(Dispatchers.IO) {
-        val requestBody = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart("generate_audio", generateAudio.toString())
-            .addFormDataPart("play_on_pc", playOnPc.toString())
-            .addFormDataPart(
-                "file",
-                "voice.wav",
-                wavAudioBytes.toRequestBody("audio/wav".toMediaType())
-            )
-            .build()
+        executeWithFallback { currentUrl ->
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("generate_audio", generateAudio.toString())
+                .addFormDataPart("play_on_pc", playOnPc.toString())
+                .addFormDataPart(
+                    "file",
+                    "voice.wav",
+                    wavAudioBytes.toRequestBody("audio/wav".toMediaType())
+                )
+                .build()
 
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/voice/ask")
-            .header("X-Bridge-Key", apiKey)
-            .post(requestBody)
-            .build()
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/voice/ask")
+                .header("X-Bridge-Key", apiKey)
+                .post(requestBody)
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        val bodyStr = response.body?.string() ?: "{}"
-        JSONObject(bodyStr)
+            val response = httpClient.newCall(request).execute()
+            val bodyStr = response.body?.string() ?: "{}"
+            JSONObject(bodyStr)
+        }
     }
 
     suspend fun askText(
@@ -186,31 +214,35 @@ class BridgeClient(
         generateAudio: Boolean = true,
         playOnPc: Boolean = true
     ): JSONObject = withContext(Dispatchers.IO) {
-        val json = JSONObject().apply {
-            put("prompt", prompt)
-            put("generate_audio", generateAudio)
-            put("play_on_pc", playOnPc)
-        }
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/text/ask")
-            .header("X-Bridge-Key", apiKey)
-            .post(json.toString().toRequestBody("application/json".toMediaType()))
-            .build()
+        executeWithFallback { currentUrl ->
+            val json = JSONObject().apply {
+                put("prompt", prompt)
+                put("generate_audio", generateAudio)
+                put("play_on_pc", playOnPc)
+            }
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/text/ask")
+                .header("X-Bridge-Key", apiKey)
+                .post(json.toString().toRequestBody("application/json".toMediaType()))
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        val bodyStr = response.body?.string() ?: "{}"
-        JSONObject(bodyStr)
+            val response = httpClient.newCall(request).execute()
+            val bodyStr = response.body?.string() ?: "{}"
+            JSONObject(bodyStr)
+        }
     }
 
     suspend fun downloadAudio(audioId: String): ByteArray = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/audio/$audioId")
-            .header("X-Bridge-Key", apiKey)
-            .get()
-            .build()
+        executeWithFallback { currentUrl ->
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/audio/$audioId")
+                .header("X-Bridge-Key", apiKey)
+                .get()
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        response.body?.bytes() ?: ByteArray(0)
+            val response = httpClient.newCall(request).execute()
+            response.body?.bytes() ?: ByteArray(0)
+        }
     }
 
     suspend fun executePcAction(action: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
@@ -227,30 +259,34 @@ class BridgeClient(
         }
 
         // Fallback HTTP
-        val json = JSONObject().apply { put("action", action) }
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/pc/action")
-            .header("X-Bridge-Key", apiKey)
-            .post(json.toString().toRequestBody("application/json".toMediaType()))
-            .build()
+        executeWithFallback { currentUrl ->
+            val json = JSONObject().apply { put("action", action) }
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/pc/action")
+                .header("X-Bridge-Key", apiKey)
+                .post(json.toString().toRequestBody("application/json".toMediaType()))
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        val bodyStr = response.body?.string() ?: "{}"
-        val respJson = JSONObject(bodyStr)
-        val msg = respJson.optString("message", respJson.optString("detail", "Error"))
-        Pair(response.isSuccessful, msg)
+            val response = httpClient.newCall(request).execute()
+            val bodyStr = response.body?.string() ?: "{}"
+            val respJson = JSONObject(bodyStr)
+            val msg = respJson.optString("message", respJson.optString("detail", "Error"))
+            Pair(response.isSuccessful, msg)
+        }
     }
 
     suspend fun getPcStatus(): JSONObject = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/pc/status")
-            .header("X-Bridge-Key", apiKey)
-            .get()
-            .build()
+        executeWithFallback { currentUrl ->
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/pc/status")
+                .header("X-Bridge-Key", apiKey)
+                .get()
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        val bodyStr = response.body?.string() ?: "{}"
-        JSONObject(bodyStr)
+            val response = httpClient.newCall(request).execute()
+            val bodyStr = response.body?.string() ?: "{}"
+            JSONObject(bodyStr)
+        }
     }
 
     suspend fun getPcScreenshot(
@@ -258,86 +294,98 @@ class BridgeClient(
         quality: Int = 75,
         scale: Float = 0.8f
     ): ByteArray = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/pc/screenshot?format=$format&quality=$quality&scale=$scale")
-            .header("X-Bridge-Key", apiKey)
-            .get()
-            .build()
+        executeWithFallback { currentUrl ->
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/pc/screenshot?format=$format&quality=$quality&scale=$scale")
+                .header("X-Bridge-Key", apiKey)
+                .get()
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        response.body?.bytes() ?: ByteArray(0)
+            val response = httpClient.newCall(request).execute()
+            response.body?.bytes() ?: ByteArray(0)
+        }
     }
 
     suspend fun getPcScreenshots(): List<JSONObject> = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/pc/screenshots")
-            .header("X-Bridge-Key", apiKey)
-            .get()
-            .build()
+        executeWithFallback { currentUrl ->
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/pc/screenshots")
+                .header("X-Bridge-Key", apiKey)
+                .get()
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        val bodyStr = response.body?.string() ?: "{}"
-        val json = JSONObject(bodyStr)
-        val array = json.optJSONArray("screenshots") ?: org.json.JSONArray()
-        val list = mutableListOf<JSONObject>()
-        for (i in 0 until array.length()) {
-            list.add(array.getJSONObject(i))
+            val response = httpClient.newCall(request).execute()
+            val bodyStr = response.body?.string() ?: "{}"
+            val json = JSONObject(bodyStr)
+            val array = json.optJSONArray("screenshots") ?: org.json.JSONArray()
+            val list = mutableListOf<JSONObject>()
+            for (i in 0 until array.length()) {
+                list.add(array.getJSONObject(i))
+            }
+            list
         }
-        list
     }
 
     suspend fun getScreenshotBytes(nameOrPath: String): ByteArray = withContext(Dispatchers.IO) {
-        val encoded = java.net.URLEncoder.encode(nameOrPath, "UTF-8")
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/pc/screenshots/file?name=$encoded")
-            .header("X-Bridge-Key", apiKey)
-            .get()
-            .build()
+        executeWithFallback { currentUrl ->
+            val encoded = java.net.URLEncoder.encode(nameOrPath, "UTF-8")
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/pc/screenshots/file?name=$encoded")
+                .header("X-Bridge-Key", apiKey)
+                .get()
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        response.body?.bytes() ?: ByteArray(0)
+            val response = httpClient.newCall(request).execute()
+            response.body?.bytes() ?: ByteArray(0)
+        }
     }
 
     suspend fun captureNewScreenshot(): List<JSONObject> = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/pc/screenshots/capture")
-            .header("X-Bridge-Key", apiKey)
-            .post("{}".toRequestBody("application/json".toMediaType()))
-            .build()
+        executeWithFallback { currentUrl ->
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/pc/screenshots/capture")
+                .header("X-Bridge-Key", apiKey)
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        val bodyStr = response.body?.string() ?: "{}"
-        val json = JSONObject(bodyStr)
-        val array = json.optJSONArray("screenshots") ?: org.json.JSONArray()
-        val list = mutableListOf<JSONObject>()
-        for (i in 0 until array.length()) {
-            list.add(array.getJSONObject(i))
+            val response = httpClient.newCall(request).execute()
+            val bodyStr = response.body?.string() ?: "{}"
+            val json = JSONObject(bodyStr)
+            val array = json.optJSONArray("screenshots") ?: org.json.JSONArray()
+            val list = mutableListOf<JSONObject>()
+            for (i in 0 until array.length()) {
+                list.add(array.getJSONObject(i))
+            }
+            list
         }
-        list
     }
 
     suspend fun getPcClipboard(): String = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/pc/clipboard")
-            .header("X-Bridge-Key", apiKey)
-            .get()
-            .build()
+        executeWithFallback { currentUrl ->
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/pc/clipboard")
+                .header("X-Bridge-Key", apiKey)
+                .get()
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        val bodyStr = response.body?.string() ?: "{}"
-        JSONObject(bodyStr).optString("text", "")
+            val response = httpClient.newCall(request).execute()
+            val bodyStr = response.body?.string() ?: "{}"
+            JSONObject(bodyStr).optString("text", "")
+        }
     }
 
     suspend fun setPcClipboard(text: String): Boolean = withContext(Dispatchers.IO) {
-        val json = JSONObject().apply { put("text", text) }
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/pc/clipboard")
-            .header("X-Bridge-Key", apiKey)
-            .post(json.toString().toRequestBody("application/json".toMediaType()))
-            .build()
+        executeWithFallback { currentUrl ->
+            val json = JSONObject().apply { put("text", text) }
+            val request = Request.Builder()
+                .url("$currentUrl/api/v1/pc/clipboard")
+                .header("X-Bridge-Key", apiKey)
+                .post(json.toString().toRequestBody("application/json".toMediaType()))
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        response.isSuccessful
+            val response = httpClient.newCall(request).execute()
+            response.isSuccessful
+        }
     }
 
     fun sendClipboard(text: String): Boolean {
@@ -353,60 +401,66 @@ class BridgeClient(
 
     suspend fun getPcNetworkInfo(): JSONObject = withContext(Dispatchers.IO) {
         try {
-            val request = Request.Builder()
-                .url("$baseUrl/api/v1/pc/network")
-                .header("X-Bridge-Key", apiKey)
-                .get()
-                .build()
-            val response = httpClient.newCall(request).execute()
-            val bodyStr = response.body?.string() ?: "{}"
-            JSONObject(bodyStr)
+            executeWithFallback { currentUrl ->
+                val request = Request.Builder()
+                    .url("$currentUrl/api/v1/pc/network")
+                    .header("X-Bridge-Key", apiKey)
+                    .get()
+                    .build()
+                val response = httpClient.newCall(request).execute()
+                val bodyStr = response.body?.string() ?: "{}"
+                JSONObject(bodyStr)
+            }
         } catch (e: Exception) {
             JSONObject()
         }
     }
 
     suspend fun downloadPcFile(remotePath: String, destFile: File): Boolean = withContext(Dispatchers.IO) {
-        val url = "$baseUrl/api/v1/pc/file?path=${java.net.URLEncoder.encode(remotePath, "UTF-8")}"
-        val request = Request.Builder()
-            .url(url)
-            .header("X-Bridge-Key", apiKey)
-            .get()
-            .build()
+        executeWithFallback { currentUrl ->
+            val url = "$currentUrl/api/v1/pc/file?path=${java.net.URLEncoder.encode(remotePath, "UTF-8")}"
+            val request = Request.Builder()
+                .url(url)
+                .header("X-Bridge-Key", apiKey)
+                .get()
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        if (response.isSuccessful && response.body != null) {
-            FileOutputStream(destFile).use { out ->
-                response.body!!.byteStream().copyTo(out)
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful && response.body != null) {
+                FileOutputStream(destFile).use { out ->
+                    response.body!!.byteStream().copyTo(out)
+                }
+                true
+            } else {
+                false
             }
-            true
-        } else {
-            false
         }
     }
 
     suspend fun uploadFileToPc(filename: String, fileBytes: ByteArray): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         try {
-            val requestBody = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart(
-                    "file",
-                    filename,
-                    fileBytes.toRequestBody("application/octet-stream".toMediaType())
-                )
-                .build()
+            executeWithFallback { currentUrl ->
+                val requestBody = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart(
+                        "file",
+                        filename,
+                        fileBytes.toRequestBody("application/octet-stream".toMediaType())
+                    )
+                    .build()
 
-            val request = Request.Builder()
-                .url("$baseUrl/api/v1/pc/upload")
-                .header("X-Bridge-Key", apiKey)
-                .post(requestBody)
-                .build()
+                val request = Request.Builder()
+                    .url("$currentUrl/api/v1/pc/upload")
+                    .header("X-Bridge-Key", apiKey)
+                    .post(requestBody)
+                    .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                Pair(true, "Archivo enviado al PC con exito")
-            } else {
-                Pair(false, "Error del servidor: ${response.code}")
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    Pair(true, "Archivo enviado al PC con exito")
+                } else {
+                    Pair(false, "Error del servidor: ${response.code}")
+                }
             }
         } catch (e: Exception) {
             Pair(false, e.message ?: "Fallo de red al enviar archivo")
