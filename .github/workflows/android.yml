@@ -28,7 +28,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Check if Android project exists
+        id: check_android
+        run: |
+          if [ -d "bridge/android" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Directorio bridge/android no presente en esta rama. Omitiendo compilacion."
+          fi
+
       - name: Set up JDK 17
+        if: steps.check_android.outputs.exists == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -36,14 +47,17 @@ jobs:
           cache: 'gradle'
 
       - name: Grant execute permission for gradlew
+        if: steps.check_android.outputs.exists == 'true'
         run: chmod +x bridge/android/gradlew
 
       - name: Build Debug APK
+        if: steps.check_android.outputs.exists == 'true'
         run: |
           cd bridge/android
           ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK Artifact
+        if: steps.check_android.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: JotaLink-APK
@@ -51,7 +65,7 @@ jobs:
           if-no-files-found: error
 
       - name: Create GitHub Release on Tag
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.check_android.outputs.exists == 'true' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: bridge/android/app/build/outputs/apk/debug/app-debug.apk
