@@ -166,8 +166,8 @@ DEVICES = {
     "tv": {"name": "Android TV Salón", "type": "cast", "adb": "192.168.1.50:5555"},
     "salon": {"name": "Android TV Salón", "type": "cast", "adb": "192.168.1.50:5555"},
     "tablet": {"name": "Tablet", "type": "vnc", "host": "192.168.1.180"},
-    "movil": {"name": "Teléfono", "type": "adb", "serial": "tu_serial_adb"},
-    "telefono": {"name": "Teléfono", "type": "adb", "serial": "tu_serial_adb"},
+    "movil": {"name": "Teléfono", "type": "adb", "serial": os.getenv("JOTA_PHONE_SERIAL", "")},
+    "telefono": {"name": "Teléfono", "type": "adb", "serial": os.getenv("JOTA_PHONE_SERIAL", "")},
 }
 
 VOLUME_STEP_PERCENT = 5
