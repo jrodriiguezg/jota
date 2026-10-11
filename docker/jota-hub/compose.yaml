@@ -29,4 +29,5 @@ services:
     volumes:
       - ./data:/app/data
       - ./models:/app/models:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./bridge:/app/bridge:ro
+      - /run/user/1000/docker.sock:/var/run/docker.sock:ro
