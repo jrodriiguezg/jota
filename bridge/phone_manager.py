@@ -112,7 +112,7 @@ class PhoneConnectionManager:
             )
 
         if not target_ws:
-            logger.warning(
+            logger.debug(
                 "No hay dispositivos moviles conectados para recibir el evento '%s'.",
                 event_type,
             )
