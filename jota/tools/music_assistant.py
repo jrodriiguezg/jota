@@ -6,6 +6,7 @@ control y transferencia fluida (handoff) de musica entre el PC y el telefono mov
 import asyncio
 import json
 import logging
+import os
 import shutil
 import subprocess
 import time
@@ -59,10 +60,15 @@ def _get_ws_candidates() -> list[str]:
         if ws not in urls:
             urls.append(ws)
 
-    # Candidatos automaticos por LAN y Tailscale en elitedesk
-    for cand in ("ws://192.168.1.100:8095/ws", "ws://100.x.y.z:8095/ws"):
-        if cand not in urls:
-            urls.append(cand)
+    # Candidatos adicionales configurados por entorno o mass.json
+    extra_fallback = os.getenv("MUSIC_ASSISTANT_FALLBACK_URL", "")
+    if extra_fallback:
+        parsed_ex = urlparse(extra_fallback)
+        scheme_ex = "wss" if parsed_ex.scheme == "https" else "ws"
+        netloc_ex = parsed_ex.netloc or f"{parsed_ex.hostname}:{parsed_ex.port or 8095}"
+        ws_ex = f"{scheme_ex}://{netloc_ex}/ws"
+        if ws_ex not in urls:
+            urls.append(ws_ex)
 
     return urls
 

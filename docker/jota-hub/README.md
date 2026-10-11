@@ -9,8 +9,8 @@ Permite que los dispositivos moviles Android (JotaLink) y clientes ligeros inter
 - **STT de Alto Rendimiento**: `faster-whisper` (int8 en CPU, optimizado con AVX2).
 - **LLM Local**: `Qwen 2.5 1.5B Instruct` (GGUF cuantizado q4_k_m, context 4096 tokens).
 - **Multi-Red y Failover**:
-  - Tailscale IP: `http://100.x.y.z:8765`
-  - LAN Local IP: `http://192.168.1.100:8765`
+  - Tailscale IP: `http://<ip-tailscale>:8765`
+  - LAN Local IP: `http://<ip-lan>:8765`
 - **Integraciones Homelab**: Music Assistant, Navidrome, Home Assistant y Docker API (`/var/run/docker.sock`).
 
 ## Puesta en Marcha
@@ -23,8 +23,8 @@ docker compose up -d
 ## Verificacion
 
 ```bash
-# Comprobar estado del servicio
-curl -s http://100.x.y.z:8765/api/v1/pc/status | jq .
+# Comprobar estado del servicio local o remotamente
+curl -s http://localhost:8765/api/v1/pc/status | jq .
 
 # Ver logs en tiempo real
 docker compose logs -f

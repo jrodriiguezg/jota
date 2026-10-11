@@ -27,7 +27,7 @@ class JotaLockTileService : TileService() {
     override fun onClick() {
         super.onClick()
         val prefs = getSharedPreferences("jota_link_prefs", Context.MODE_PRIVATE)
-        val serverUrl = prefs.getString("server_url", "http://100.x.y.z:8765") ?: "http://100.x.y.z:8765"
+        val serverUrl = prefs.getString("server_url", "http://192.168.1.100:8765") ?: "http://192.168.1.100:8765"
         val apiKey = prefs.getString("api_key", "jota-secret-tailscale-key") ?: "jota-secret-tailscale-key"
 
         vibrateClick()
