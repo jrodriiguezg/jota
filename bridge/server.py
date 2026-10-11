@@ -463,9 +463,62 @@ def bridge_pairing():
     return get_pairing_payload()
 
 
+def _docker_socket_request(
+    method: str, path: str, body: bytes | None = None
+) -> tuple[int, bytes]:
+    """Realiza una solicitud directa al socket UNIX de Docker Engine (/var/run/docker.sock)."""
+    import http.client
+    import socket
+
+    sock_path = "/var/run/docker.sock"
+    if not Path(sock_path).exists():
+        return -1, b""
+
+    class UnixHTTPConnection(http.client.HTTPConnection):
+        def connect(self):
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.settimeout(10.0)
+            self.sock.connect(sock_path)
+
+    conn = UnixHTTPConnection("localhost")
+    try:
+        conn.request(method, path, body=body)
+        resp = conn.getresponse()
+        return resp.status, resp.read()
+    except Exception as e:
+        logger.debug("Error en conexion al socket de Docker: %s", e)
+        return -1, str(e).encode("utf-8")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @app.get("/api/v1/homelab/containers", dependencies=[Depends(verify_auth)])
 def homelab_list_containers():
     """Lista todos los contenedores Docker o Podman y su estado en el host."""
+    # 1. Probar acceso directo mediante socket UNIX de Docker Engine
+    if Path("/var/run/docker.sock").exists():
+        try:
+            status_code, raw_bytes = _docker_socket_request("GET", "/containers/json?all=true")
+            if status_code == 200:
+                raw_list = json.loads(raw_bytes.decode("utf-8"))
+                containers = []
+                for item in raw_list:
+                    names = [n.lstrip("/") for n in item.get("Names", [])]
+                    name = names[0] if names else item.get("Id", "")[:12]
+                    containers.append({
+                        "name": name,
+                        "image": item.get("Image", ""),
+                        "status": item.get("Status", ""),
+                        "state": item.get("State", ""),
+                    })
+                return {"containers": containers, "count": len(containers)}
+        except Exception as e:
+            logger.debug("Fallo lectura de Docker via socket UNIX: %s", e)
+
+    # 2. Fallback a binario CLI (docker / podman)
     engine = shutil.which("docker") or shutil.which("podman")
     if not engine:
         raise HTTPException(
@@ -530,6 +583,21 @@ def homelab_container_action(payload: HomelabContainerActionPayload):
             detail="Accion no permitida. Solo 'start', 'stop' o 'restart'.",
         )
 
+    # 1. Probar API sobre socket UNIX
+    if Path("/var/run/docker.sock").exists():
+        try:
+            status_code, _ = _docker_socket_request(
+                "POST", f"/containers/{clean_name}/{clean_action}"
+            )
+            if status_code in (204, 200):
+                return {
+                    "success": True,
+                    "message": f"Contenedor '{clean_name}' {clean_action} ejecutado con exito.",
+                }
+        except Exception as e:
+            logger.debug("Fallo accion Docker via socket UNIX: %s", e)
+
+    # 2. Fallback a binario CLI
     engine = shutil.which("docker") or shutil.which("podman")
     if not engine:
         raise HTTPException(
