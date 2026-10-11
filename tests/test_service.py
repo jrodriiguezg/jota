@@ -107,3 +107,61 @@ class TestCopilotVoiceService:
         service._on_key_press()
         service.wake_listener.pause.assert_called_once()
 
+    def test_audio_ducking_lifecycle(self):
+        mock_orb = MagicMock()
+        service = CopilotVoiceService(orb=mock_orb)
+        service.ducker = MagicMock()
+
+        service._on_key_press()
+        service.ducker.duck.assert_called_once()
+
+        service.stop()
+        service.ducker.unduck.assert_called()
+
+
+class TestAudioDucker:
+    @patch("subprocess.run")
+    def test_duck_playerctl_playing(self, mock_run):
+        from jota.audio import AudioDucker
+
+        ducker = AudioDucker()
+        mock_run.side_effect = [
+            MagicMock(stdout="Playing\n", returncode=0),
+            MagicMock(stdout="0.85\n", returncode=0),
+            MagicMock(returncode=0),
+        ]
+
+        assert ducker.duck() is True
+        assert ducker.is_ducked is True
+        assert ducker.duck_mode == "playerctl"
+        assert ducker.saved_playerctl_vol == 0.85
+
+        # Restore
+        mock_run.side_effect = [MagicMock(returncode=0)]
+        assert ducker.unduck() is True
+        assert ducker.is_ducked is False
+        assert ducker.duck_mode is None
+
+    @patch("subprocess.run")
+    def test_duck_wpctl_fallback(self, mock_run):
+        from jota.audio import AudioDucker
+
+        ducker = AudioDucker()
+        mock_run.side_effect = [
+            MagicMock(stdout="No players found\n", returncode=1),
+            MagicMock(stdout="Volume: 0.70\n", returncode=0),
+            MagicMock(returncode=0),
+        ]
+
+        assert ducker.duck() is True
+        assert ducker.is_ducked is True
+        assert ducker.duck_mode == "wpctl"
+        assert ducker.saved_sink_vol == 0.70
+
+        # Unduck with mode check
+        assert ducker.unduck(only_if_mode="playerctl") is False
+        assert ducker.is_ducked is True
+
+        assert ducker.unduck(only_if_mode="wpctl") is True
+        assert ducker.is_ducked is False
+

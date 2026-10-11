@@ -1,6 +1,8 @@
 """Modulo de audio: grabacion desde microfono con limites y gestion segura de recursos."""
 
 import logging
+import re
+import subprocess
 import threading
 import wave
 from pathlib import Path
@@ -137,3 +139,130 @@ def _save_wav(audio: np.ndarray, path: Path) -> None:
         wf.setframerate(AUDIO_SAMPLE_RATE)
         wf.writeframes(audio.tobytes())
     logger.debug("Audio guardado en %s", path)
+
+
+class AudioDucker:
+    """
+    Gestiona la atenuacion automatica de volumen multimedia (audio ducking).
+    Reduce el volumen de la musica activa o del sistema mientras el usuario habla con Jota
+    para mejorar la captura de voz y transcripcion, y restaura el volumen al terminar.
+    """
+
+    def __init__(self, duck_volume_ratio: float = 0.15, duck_sink_ratio: float = 0.20):
+        self.duck_volume_ratio = duck_volume_ratio
+        self.duck_sink_ratio = duck_sink_ratio
+        self.is_ducked = False
+        self.duck_mode: str | None = None
+        self.saved_playerctl_vol: float | None = None
+        self.saved_sink_vol: float | None = None
+        self._lock = threading.Lock()
+
+    def duck(self) -> bool:
+        """Atenua el volumen multimedia o del sistema. Devuelve True si se atenuo algo."""
+        with self._lock:
+            if self.is_ducked:
+                return True
+            try:
+                # 1. Comprobar reproductores MPRIS activos (playerctl)
+                res = subprocess.run(
+                    ["playerctl", "status"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.0,
+                )
+                if "Playing" in res.stdout:
+                    v_res = subprocess.run(
+                        ["playerctl", "volume"],
+                        capture_output=True,
+                        text=True,
+                        timeout=1.0,
+                    )
+                    try:
+                        vol = float(v_res.stdout.strip())
+                    except ValueError:
+                        vol = 1.0
+                    self.saved_playerctl_vol = vol
+                    subprocess.run(
+                        ["playerctl", "volume", f"{self.duck_volume_ratio:.2f}"],
+                        capture_output=True,
+                        timeout=1.0,
+                    )
+                    self.is_ducked = True
+                    self.duck_mode = "playerctl"
+                    logger.info(
+                        "Audio ducking activado via playerctl (volumen previo: %.2f)", vol
+                    )
+                    return True
+
+                # 2. Si no hay reproductor MPRIS, atenuar sink por defecto de PipeWire
+                wp_res = subprocess.run(
+                    ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.0,
+                )
+                if wp_res.returncode == 0:
+                    m = re.search(r"Volume:\s+([0-9.]+)", wp_res.stdout)
+                    if m:
+                        vol = float(m.group(1))
+                        self.saved_sink_vol = vol
+                        subprocess.run(
+                            [
+                                "wpctl",
+                                "set-volume",
+                                "@DEFAULT_AUDIO_SINK@",
+                                f"{self.duck_sink_ratio:.2f}",
+                            ],
+                            capture_output=True,
+                            timeout=1.0,
+                        )
+                        self.is_ducked = True
+                        self.duck_mode = "wpctl"
+                        logger.info(
+                            "Audio ducking activado via wpctl (volumen previo: %.2f)", vol
+                        )
+                        return True
+            except Exception as e:
+                logger.debug("Error aplicando audio ducking: %s", e)
+            return False
+
+    def unduck(self, only_if_mode: str | None = None) -> bool:
+        """Restaura el volumen previo. Si only_if_mode coincide o es None, restaura."""
+        with self._lock:
+            if not self.is_ducked:
+                return False
+            if only_if_mode and self.duck_mode != only_if_mode:
+                return False
+            try:
+                if self.duck_mode == "playerctl" and self.saved_playerctl_vol is not None:
+                    subprocess.run(
+                        ["playerctl", "volume", f"{self.saved_playerctl_vol:.2f}"],
+                        capture_output=True,
+                        timeout=1.0,
+                    )
+                    logger.info(
+                        "Audio ducking restaurado via playerctl (volumen: %.2f)",
+                        self.saved_playerctl_vol,
+                    )
+                elif self.duck_mode == "wpctl" and self.saved_sink_vol is not None:
+                    subprocess.run(
+                        [
+                            "wpctl",
+                            "set-volume",
+                            "@DEFAULT_AUDIO_SINK@",
+                            f"{self.saved_sink_vol:.2f}",
+                        ],
+                        capture_output=True,
+                        timeout=1.0,
+                    )
+                    logger.info(
+                        "Audio ducking restaurado via wpctl (volumen: %.2f)", self.saved_sink_vol
+                    )
+            except Exception as e:
+                logger.debug("Error restaurando audio ducking: %s", e)
+            finally:
+                self.is_ducked = False
+                self.duck_mode = None
+                self.saved_playerctl_vol = None
+                self.saved_sink_vol = None
+            return True

@@ -32,6 +32,7 @@ def normalize_speech_command(text: str) -> str:
     clean = re.sub(r"\b(fiera|fierra|sierra|cierre|cerra)\b", "cierra", clean)
 
     # Confusiones de verbos de volumen (fonetica de Whisper)
+    clean = re.sub(r"\bsobre\s+(el\s+)?(volumen|sonido|audio)\b", r"sube \1\2", clean)
     clean = re.sub(r"\b(suelva|suelvo|suelba|suelbo|suelve)\b", "sube", clean)
     clean = re.sub(r"\b(bajame|bajale|bajalo)\b", "baja", clean)
     clean = re.sub(r"\b(subeme|subele|subelo)\b", "sube", clean)
@@ -50,6 +51,14 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     Si coincide, devuelve (tool_name, kwargs) para ejecucion instantanea sin esperar al LLM.
     """
     clean = normalize_speech_command(text)
+
+    # 0. Ayuda y capacidades del asistente (sin LLM)
+    if re.search(
+        r"^(que\s+(puedes|sabes)\s+hacer(\s+jota)?|que\s+funciones\s+tienes|ayuda(\s+jota)?|"
+        r"que\s+comandos\s+(tienes|hay)|comandos|de\s+que\s+eres\s+capaz)$",
+        clean,
+    ):
+        return "help", {}
 
     # 1. Captura de pantalla
     if re.search(
@@ -84,7 +93,7 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         return "volume_control", {"action": "set", "level": int(val)}
 
     if re.search(
-        r"^(sube|subir|aumenta|aumentar|mas|subeme)\s+(el\s+)?(volumen|sonido|audio)",
+        r"^(sube|subir|aumenta|aumentar|mas|subeme|sobre)\s+(el\s+)?(volumen|sonido|audio)",
         clean,
     ):
         return "volume_control", {"direction": "up"}
@@ -147,7 +156,7 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     ):
         return "media_control", {"action": "play"}
 
-    # 3e. Reproducir cancion especifica o artista con cola inteligente (Navidrome)
+    # 3e. Reproducir cancion especifica o artista (Music Assistant / Navidrome)
     m_navidrome = re.search(
         r"^(?:pon|ponme|reproduce|reproducir)\s+"
         r"(?:la\s+canci[oó]n|el\s+tema|la\s+pista|m[uú]sica\s+de|algo\s+de)\s+"
@@ -158,16 +167,23 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     if m_navidrome:
         target = (m_navidrome.group(1) or m_navidrome.group(2) or "").strip()
         if target:
-            return "navidrome_play", {"query": target}
+            return "music_assistant_play", {"query": target, "target": "pc"}
 
-    # 3f. Handoff de reproduccion al telefono movil
-    if re.search(
-        r"^(?:manda|mandar|envia|enviar|pasa|pasar|mueve|mover)\s+"
+    # 3f. Transferencia de reproduccion / Music Assistant (movil, pc, tele)
+    m_handoff = re.search(
+        r"^(?:manda|mandar|envia|enviar|pasa|pasar|mueve|mover|transfiere|transferir)\s+"
         r"(?:la\s+)?(?:reproducci[oó]n|m[uú]sica|canci[oó]n)\s+"
-        r"al\s+(?:m[oó]vil|tel[eé]fono|celular)$",
+        r"(?:al|a\s+la|a\s+tu|a\s+este)\s+"
+        r"(m[oó]vil|tel[eé]fono|celular|pc|ordenador|escritorio|tele|televisi[oó]n|tv)$",
         clean,
-    ):
-        return "media_handoff", {}
+    )
+    if m_handoff:
+        target_token = m_handoff.group(1).lower()
+        if any(k in target_token for k in ("pc", "ordenador", "escritorio")):
+            return "music_assistant_transfer", {"source": "movil", "target": "pc"}
+        if target_token in ("tele", "televisión", "television", "tv"):
+            return "music_assistant_transfer", {"source": "pc", "target": "tele"}
+        return "music_assistant_transfer", {"source": "pc", "target": "movil"}
 
     # 4. Busqueda web
     search_prefix = re.search(
@@ -1085,7 +1101,12 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         target = args.get("target") or args.get("name") or args.get("file") or ""
         return "phone_send_file", {"target": str(target)}
 
-    # 33. Navidrome smart radio
+    # 33. Music Assistant / Navidrome play
+    if norm_name in ("musicassistantplay", "massplay"):
+        query = args.get("query") or args.get("song") or args.get("name") or args.get("target", "")
+        target = args.get("target", "pc")
+        return "music_assistant_play", {"query": str(query), "target": str(target)}
+
     if norm_name in (
         "navidromeplay",
         "navidrome",
@@ -1097,7 +1118,12 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         query = args.get("query") or args.get("song") or args.get("name") or args.get("target", "")
         return "navidrome_play", {"query": str(query)}
 
-    # 34. Transferencia multimedia al movil
+    # 34. Transferencia multimedia (Music Assistant / Handoff)
+    if norm_name in ("musicassistanttransfer", "masstransfer"):
+        source = args.get("source", "pc")
+        target = args.get("target", "movil")
+        return "music_assistant_transfer", {"source": str(source), "target": str(target)}
+
     if norm_name in (
         "mediahandoff",
         "handoffmedia",
@@ -1165,6 +1191,14 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
 
     if tool_name == "screenshot":
         return take_screenshot_to_clipboard()
+
+    if tool_name == "help":
+        return True, (
+            "Puedo controlar volumen y musica, abrir aplicaciones, "
+            "gestionar ventanas y escritorios, comprobar el clima y la bateria, "
+            "gestionar notas y temporizadores, transferir contenido a tu movil o la tele, "
+            "y responder a cualquier duda."
+        )
 
     if tool_name == "volume_control":
         if args.get("action") == "mute":
@@ -1345,14 +1379,17 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         from jota.tools.phone import send_active_file_to_phone
         return send_active_file_to_phone(target=args.get("target", ""))
 
-    if tool_name == "navidrome_play":
-        from jota.tools.navidrome import play_navidrome_smart_radio
+    if tool_name in ("music_assistant_play", "navidrome_play"):
+        from jota.tools.music_assistant import play_music_assistant
         query = args.get("query", "")
-        return play_navidrome_smart_radio(query)
+        target = args.get("target", "pc")
+        return play_music_assistant(query=str(query), target_alias=str(target))
 
-    if tool_name == "media_handoff":
-        from jota.tools.navidrome import transfer_playback_to_phone
-        return transfer_playback_to_phone()
+    if tool_name in ("music_assistant_transfer", "media_handoff"):
+        from jota.tools.music_assistant import transfer_music
+        source = args.get("source", "pc")
+        target = args.get("target", "movil")
+        return transfer_music(source_alias=str(source), target_alias=str(target))
 
     if tool_name == "trigger_scene":
         from jota.tools.scenes import trigger_scene

@@ -530,7 +530,7 @@ class MainActivity : ComponentActivity() {
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Image(
-                                    painter = painterResource(id = R.mipmap.ic_launcher),
+                                    painter = painterResource(id = R.drawable.ic_jota_logo),
                                     contentDescription = "Jota Logo",
                                     modifier = Modifier
                                         .size(24.dp)

@@ -35,6 +35,7 @@ class CopilotVoiceService:
     def __init__(self, orb: OrbClient | None = None, enable_handsfree: bool = HANDSFREE_ENABLED):
         self.orb = orb if orb is not None else OrbClient()
         self.recorder = audio.AudioRecorder(level_callback=lambda lvl: self.orb.set_level(lvl))
+        self.ducker = audio.AudioDucker()
         self._processing_lock = threading.Lock()
         self._busy = False
         self._copilot: hotkey.CopilotHotkey | None = None
@@ -88,6 +89,7 @@ class CopilotVoiceService:
             self.recorder.stop()
         except Exception:
             pass
+        self.ducker.unduck()
         self.orb.set_state("idle")
         self.orb.quit()
         logger.info("CopilotVoiceService detenido.")
@@ -99,6 +101,7 @@ class CopilotVoiceService:
             return
         if self.wake_listener:
             self.wake_listener.pause()
+        self.ducker.duck()
         self.orb.set_state("listening", 0.0)
         self.recorder.start()
 
@@ -125,6 +128,7 @@ class CopilotVoiceService:
             self._busy = True
             if self.wake_listener:
                 self.wake_listener.pause()
+            self.ducker.duck()
             try:
                 if command.strip():
                     logger.info("Orden manos libres recibida con wake word: %r", command)
@@ -166,6 +170,7 @@ class CopilotVoiceService:
                     self.orb.set_state("idle")
             finally:
                 self._busy = False
+                self.ducker.unduck()
                 if self.wake_listener:
                     self.wake_listener.resume()
 
@@ -202,6 +207,7 @@ class CopilotVoiceService:
                     self.orb.set_state("idle")
             finally:
                 self._busy = False
+                self.ducker.unduck()
                 if self.wake_listener:
                     self.wake_listener.resume()
 
@@ -209,6 +215,7 @@ class CopilotVoiceService:
         audio_path = self.recorder.stop()
         if audio_path is None:
             logger.info("Sin audio capturado.")
+            self.ducker.unduck()
             self.orb.set_state("idle")
             return
 
@@ -218,6 +225,7 @@ class CopilotVoiceService:
             text = stt.transcribe(audio_path)
             if not text:
                 logger.info("Transcripcion vacia.")
+                self.ducker.unduck()
                 self.orb.set_state("idle")
                 return
 
@@ -226,6 +234,7 @@ class CopilotVoiceService:
             clean = stt.strip_wake_word(text, require_wake_word=False)
             if not clean:
                 logger.info("Audio sin contenido tras limpieza de wake word.")
+                self.ducker.unduck()
                 self.orb.set_state("idle")
                 return
 
@@ -233,6 +242,7 @@ class CopilotVoiceService:
 
         finally:
             audio_path.unlink(missing_ok=True)
+            self.ducker.unduck()
             self.orb.set_state("idle")
 
     def _execute_command(self, clean: str) -> None:
@@ -241,8 +251,10 @@ class CopilotVoiceService:
         if fast_handled:
             logger.info("Accion rapida resuelta sin LLM: %s", fast_msg)
             if fast_msg:
+                self.ducker.unduck(only_if_mode="wpctl")
                 self.orb.set_state("speaking")
                 tts.speak(fast_msg)
+            self.ducker.unduck()
             self.orb.set_state("idle")
             return
 
@@ -251,6 +263,7 @@ class CopilotVoiceService:
         response = llm.ask(clean)
         if not response:
             logger.warning("LLM devolvio respuesta vacia.")
+            self.ducker.unduck()
             self.orb.set_state("idle")
             return
 
@@ -259,14 +272,18 @@ class CopilotVoiceService:
             logger.info("Herramienta ejecutada via LLM: %s", tool_msg)
             spoken_text = llm.clean_text_for_tts(response) or tool_msg
             if spoken_text:
+                self.ducker.unduck(only_if_mode="wpctl")
                 self.orb.set_state("speaking")
                 tts.speak(spoken_text)
+            self.ducker.unduck()
             self.orb.set_state("idle")
             return
 
         clean_response = llm.clean_text_for_tts(response)
         if clean_response:
             logger.info("Respondiendo: %r", clean_response)
+            self.ducker.unduck(only_if_mode="wpctl")
             self.orb.set_state("speaking")
             tts.speak(clean_response)
+        self.ducker.unduck()
         self.orb.set_state("idle")

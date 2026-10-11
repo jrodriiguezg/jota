@@ -1015,23 +1015,23 @@ class TestNavidromeAndHandoffTools:
 
     def test_fast_intents_navidrome(self):
         res = match_fast_intent("pon la cancion Midnight City")
-        assert res == ("navidrome_play", {"query": "midnight city"})
+        assert res == ("music_assistant_play", {"query": "midnight city", "target": "pc"})
 
         res2 = match_fast_intent("reproduce algo de Queen")
-        assert res2 == ("navidrome_play", {"query": "queen"})
+        assert res2 == ("music_assistant_play", {"query": "queen", "target": "pc"})
 
         res3 = match_fast_intent("pon musica de M83")
-        assert res3 == ("navidrome_play", {"query": "m83"})
+        assert res3 == ("music_assistant_play", {"query": "m83", "target": "pc"})
 
     def test_fast_intents_handoff(self):
         res = match_fast_intent("manda la reproduccion al movil")
-        assert res == ("media_handoff", {})
+        assert res == ("music_assistant_transfer", {"source": "pc", "target": "movil"})
 
         res2 = match_fast_intent("pasa la musica al movil")
-        assert res2 == ("media_handoff", {})
+        assert res2 == ("music_assistant_transfer", {"source": "pc", "target": "movil"})
 
         res3 = match_fast_intent("envia la musica al telefono")
-        assert res3 == ("media_handoff", {})
+        assert res3 == ("music_assistant_transfer", {"source": "pc", "target": "movil"})
 
     def test_parse_llm_tool_navidrome_and_handoff(self):
         call1 = parse_llm_tool_call("TOOL: navidrome_play(query='Bohemian Rhapsody')")
@@ -1039,6 +1039,16 @@ class TestNavidromeAndHandoffTools:
 
         call2 = parse_llm_tool_call("TOOL: media_handoff()")
         assert call2 == ("media_handoff", {})
+
+        call3 = parse_llm_tool_call(
+            "TOOL: music_assistant_play(query='Queen', target='pc')"
+        )
+        assert call3 == ("music_assistant_play", {"query": "Queen", "target": "pc"})
+
+        call4 = parse_llm_tool_call(
+            "TOOL: music_assistant_transfer(source='pc', target='movil')"
+        )
+        assert call4 == ("music_assistant_transfer", {"source": "pc", "target": "movil"})
 
     @patch("jota.tools.navidrome._call_subsonic")
     @patch("jota.tools.navidrome.save_remote_play_queue")
@@ -1252,6 +1262,54 @@ class TestStreamingAndDevices:
         assert ok is True
         assert "anadida a favoritos" in msg
         mock_subsonic.assert_called_with("star", {"id": "fav123"})
+
+    def test_help_fast_intent_and_execution(self):
+        from jota.tools import handle_intent
+        from jota.tools.router import execute_tool, match_fast_intent
+
+        for query in ("que puedes hacer", "que sabes hacer", "ayuda", "comandos"):
+            res = match_fast_intent(query)
+            assert res == ("help", {})
+
+        ok, msg = execute_tool("help", {})
+        assert ok is True
+        assert "Puedo controlar volumen" in msg
+
+        handled, resp = handle_intent("que puedes hacer")
+        assert handled is True
+        assert "Puedo controlar volumen" in resp
+
+    def test_sobre_volumen_phonetic_normalization(self):
+        from jota.tools.router import match_fast_intent, normalize_speech_command
+
+        assert "sube volumen" in normalize_speech_command("sobre volumen")
+        assert "sube el volumen" in normalize_speech_command("sobre el volumen")
+
+        res = match_fast_intent("sobre volumen")
+        assert res == ("volume_control", {"direction": "up"})
+
+        res2 = match_fast_intent("sobre el volumen")
+        assert res2 == ("volume_control", {"direction": "up"})
+
+    @patch("jota.tools.music_assistant._load_auth_token", return_value="")
+    @patch("jota.tools.navidrome.transfer_playback_to_phone")
+    def test_music_assistant_transfer_fallback_to_navidrome(self, mock_handoff, mock_tok):
+        from jota.tools.music_assistant import transfer_music
+
+        mock_handoff.return_value = (True, "Continuando cancion")
+        ok, msg = transfer_music("pc", "movil")
+        assert ok is True
+        assert "Navidrome" in msg
+
+    @patch("jota.tools.music_assistant._load_auth_token", return_value="")
+    @patch("jota.tools.navidrome.play_navidrome_smart_radio")
+    def test_music_assistant_play_fallback_to_navidrome(self, mock_play, mock_tok):
+        from jota.tools.music_assistant import play_music_assistant
+
+        mock_play.return_value = (True, "Reproduciendo en Navidrome")
+        ok, msg = play_music_assistant("Daft Punk")
+        assert ok is True
+        assert "Navidrome" in msg
 
 
 
