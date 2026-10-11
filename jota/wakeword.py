@@ -70,6 +70,10 @@ class WakeWordListener:
         self._stream: sd.InputStream | None = None
         self._worker_thread: threading.Thread | None = None
 
+        from jota.vad import SileroVAD
+
+        self.vad = SileroVAD(sample_rate=self.sample_rate)
+
     @property
     def is_running(self) -> bool:
         """Devuelve True si el listener esta activo."""
@@ -129,6 +133,7 @@ class WakeWordListener:
         self._speech_frames.clear()
         self._silence_blocks = 0
         self._consecutive_speech_blocks = 0
+        self.vad.reset()
         while not self._queue.empty():
             try:
                 self._queue.get_nowait()
@@ -143,6 +148,7 @@ class WakeWordListener:
         self._silence_blocks = 0
         self._consecutive_speech_blocks = 0
         self._paused = False
+        self.vad.reset()
 
     def _audio_callback(self, indata: np.ndarray, frames: int, time_info, status) -> None:
         """Procesa bloques continuos de audio con Voice Activity Detection."""
@@ -153,7 +159,12 @@ class WakeWordListener:
         rms = float(np.sqrt(np.mean(raw**2))) / 32768.0
         peak = float(np.max(np.abs(indata))) / 32768.0
 
-        if self.level_callback and (self._in_speech or rms >= self.vad_threshold):
+        if self.vad and self.vad.is_available:
+            is_voice = self.vad.is_speech(indata) or (rms >= self.vad_threshold)
+        else:
+            is_voice = rms >= self.vad_threshold
+
+        if self.level_callback and (self._in_speech or is_voice):
             try:
                 self.level_callback(min(1.0, peak * 2.8))
             except Exception:
@@ -161,7 +172,7 @@ class WakeWordListener:
 
         if not self._in_speech:
             self._pre_buffer.append(indata.copy())
-            if rms >= self.vad_threshold:
+            if is_voice:
                 self._consecutive_speech_blocks += 1
                 if self._consecutive_speech_blocks >= 2:
                     self._in_speech = True
@@ -173,7 +184,7 @@ class WakeWordListener:
                 self._consecutive_speech_blocks = 0
         else:
             self._speech_frames.append(indata.copy())
-            if rms >= self.vad_threshold:
+            if is_voice:
                 self._silence_blocks = 0
             else:
                 self._silence_blocks += 1

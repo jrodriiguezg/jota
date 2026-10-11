@@ -597,6 +597,60 @@ class TestMobileTransferFeatures:
         # No debe devolver 405 Method Not Allowed
         assert resp.status_code in (200, 404)
 
+    @patch("bridge.server.subprocess.run")
+    @patch("bridge.server.shutil.which", return_value="/usr/bin/docker")
+    def test_homelab_containers_endpoint(self, mock_which, mock_run, client):
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.stdout = (
+            '{"Names": "jota-hub", "Image": "jota:latest", '
+            '"Status": "Up", "State": "running"}\n'
+        )
+        mock_run.return_value = proc
+
+        resp = client.get(
+            "/api/v1/homelab/containers",
+            headers={"X-Bridge-Key": BRIDGE_API_KEY},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "containers" in data
+        assert data["count"] == 1
+        assert data["containers"][0]["name"] == "jota-hub"
+
+    @patch("bridge.server.subprocess.run")
+    @patch("bridge.server.shutil.which", return_value="/usr/bin/docker")
+    def test_homelab_container_action_endpoint(self, mock_which, mock_run, client):
+        proc = MagicMock()
+        proc.returncode = 0
+        mock_run.return_value = proc
+
+        resp = client.post(
+            "/api/v1/homelab/container",
+            headers={"X-Bridge-Key": BRIDGE_API_KEY},
+            json={"name": "navidrome", "action": "restart"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "navidrome" in data["message"]
+
+    @patch("jota.tools.screen_vision.query_vision_model")
+    def test_mobile_vision_analyze_endpoint(self, mock_query, client):
+        mock_query.return_value = (True, "Un teclado mecanico sobre la mesa.")
+        dummy_png = b"\x89PNG\r\n\x1a\nfakeimagebytes"
+
+        resp = client.post(
+            "/api/v1/vision/analyze",
+            headers={"X-Bridge-Key": BRIDGE_API_KEY},
+            files={"file": ("photo.jpg", dummy_png, "image/jpeg")},
+            data={"question": "Que es esto?"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "teclado" in data["description"]
+
 
 
 

@@ -64,6 +64,59 @@ def get_active_window_info() -> dict[str, str]:
     return {"class": "", "title": ""}
 
 
+def get_desktop_context() -> dict[str, Any]:
+    """Obtiene informacion detallada del entorno y ventana activa en Hyprland."""
+    if not shutil.which("hyprctl"):
+        return {"class": "", "title": "", "workspace": 1, "fullscreen": False}
+
+    info: dict[str, Any] = {
+        "class": "",
+        "title": "",
+        "workspace": 1,
+        "fullscreen": False,
+        "floating": False,
+    }
+    try:
+        proc = subprocess.run(
+            ["hyprctl", "activewindow", "-j"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            data = json.loads(proc.stdout)
+            info["class"] = data.get("class", "")
+            info["title"] = data.get("title", "")
+            ws = data.get("workspace", {})
+            info["workspace"] = ws.get("id", 1) if isinstance(ws, dict) else 1
+            info["fullscreen"] = bool(data.get("fullscreen", 0))
+            info["floating"] = bool(data.get("floating", False))
+    except Exception as e:
+        logger.debug("Error leyendo contexto de escritorio: %s", e)
+
+    return info
+
+
+def get_active_context_summary() -> str:
+    """Devuelve un resumen conciso del contexto de pantalla para el LLM."""
+    ctx = get_desktop_context()
+    app = ctx.get("class", "").strip()
+    title = ctx.get("title", "").strip()
+    ws = ctx.get("workspace", 1)
+
+    if not app and not title:
+        return ""
+
+    parts: list[str] = []
+    if title:
+        parts.append(f"ventana activa '{title}'")
+    if app:
+        parts.append(f"aplicacion '{app}'")
+    parts.append(f"espacio de trabajo {ws}")
+    return ", ".join(parts)
+
+
 def get_implicit_media_url() -> str:
     """
     Determina la URL de contenido a reproducir o castear:

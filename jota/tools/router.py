@@ -227,13 +227,14 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         reserved_app_prefixes = (
             "brillo",
             "filtro",
-            "modo noche",
+            "modo",
             "luz nocturna",
             "esta ventana",
             "la ventana",
             "ventana",
             "contenedor",
             "puerto",
+            "bluetooth",
         )
         if not any(app_target.startswith(p) for p in reserved_app_prefixes):
             if not re.search(r"\ben\s+la\s+(?:tele|televisi[oó]n|tv)\b", app_target):
@@ -383,13 +384,13 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     # 16. Manipulacion de ventanas (pantalla completa, flotante, pin, centrar)
     if re.search(
         r"^(?:pon\s+(?:esta\s+)?ventana\s+en\s+pantalla\s+completa|pantalla\s+completa|"
-        r"maximiza(?:r)?\s+(?:la\s+)?ventana|quita(?:r)?\s+(?:la\s+)?pantalla\s+completa)$",
+        r"maximiza(?:r)?\s+(?:la\s+)?(?:ventana|esto)|quita(?:r)?\s+(?:la\s+)?pantalla\s+completa)$",
         clean,
     ):
         return "window_action", {"action": "fullscreen"}
 
     if re.search(
-        r"^(?:haz\s+flotante\s+(?:esta\s+)?ventana|ventana\s+flotante|"
+        r"^(?:haz\s+flotante\s+(?:esta\s+)?(?:ventana|esto)|ventana\s+flotante|"
         r"devuelve\s+(?:la\s+)?ventana\s+al\s+mosaico|pon\s+(?:la\s+)?ventana\s+en\s+mosaico|"
         r"modo\s+flotante|alterna(?:r)?\s+flotante)$",
         clean,
@@ -397,18 +398,21 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
         return "window_action", {"action": "float"}
 
     if re.search(
-        r"^(?:fija(?:r)?|ancla(?:r)?)\s+(?:esta\s+)?ventana"
+        r"^(?:fija(?:r)?|ancla(?:r)?)\s+(?:esta\s+)?(?:ventana|esto)"
         r"(?:\s+en\s+todos\s+los\s+escritorios)?$",
         clean,
     ):
         return "window_action", {"action": "pin"}
 
-    if re.search(r"^(?:centra(?:r)?\s+(?:esta\s+)?ventana|centrar\s+ventana)$", clean):
+    if re.search(
+        r"^(?:centra(?:r)?\s+(?:esta\s+)?(?:ventana|esto)|centrar\s+ventana)$",
+        clean,
+    ):
         return "window_action", {"action": "center"}
 
     # 16b. Cierre de ventanas o aplicaciones especificas
     if re.search(
-        r"^(?:cierra|cerrar|quitar|quita)\s+(?:esta\s+|la\s+)?ventana(?:\s+activa)?$",
+        r"^(?:cierra|cerrar|quitar|quita)\s+(?:(?:esta\s+|la\s+)?ventana(?:\s+activa)?|esto)$",
         clean,
     ):
         return "close_window", {"app": ""}
@@ -486,6 +490,65 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     ):
         return "night_mode_control", {"action": "toggle"}
 
+    # 19b. Control de Bluetooth
+    if re.search(r"^(?:enciende|encender|activa|activar)\s+(?:el\s+)?bluetooth$", clean):
+        return "bluetooth_control", {"action": "on"}
+
+    if re.search(r"^(?:apaga|apagar|desactiva|desactivar)\s+(?:el\s+)?bluetooth$", clean):
+        return "bluetooth_control", {"action": "off"}
+
+    if re.search(
+        r"^(?:estado\s+del\s+bluetooth|bluetooth|como\s+esta\s+el\s+bluetooth|"
+        r"dispositivos\s+bluetooth)$",
+        clean,
+    ):
+        return "bluetooth_control", {"action": "status"}
+
+    m_bt_conn = re.search(
+        r"^(?:conecta|conectar)\s+(?:el\s+|los\s+|al\s+)?(?:bluetooth\s+|dispositivo\s+)?"
+        r"(auriculares|cascos|mando|teclado|altavoz|raton|[a-zA-Z0-9_-]+)$",
+        clean,
+    )
+    if m_bt_conn and m_bt_conn.group(1) not in ("tele", "tv", "pantalla", "wifi"):
+        return "bluetooth_control", {"action": "connect", "device": m_bt_conn.group(1)}
+
+    m_bt_disc = re.search(
+        r"^(?:desconecta|desconectar)\s+(?:el\s+|los\s+|del\s+)?(?:bluetooth\s+|dispositivo\s+)?"
+        r"(auriculares|cascos|mando|teclado|altavoz|raton|[a-zA-Z0-9_-]+)$",
+        clean,
+    )
+    if m_bt_disc and m_bt_disc.group(1) not in ("tele", "tv", "pantalla", "wifi"):
+        return "bluetooth_control", {"action": "disconnect", "device": m_bt_disc.group(1)}
+
+    # 19c. Perfiles de energia y rendimiento
+    if re.search(
+        r"^(?:pon|activa|establece|cambia\s+a)\s+(?:el\s+)?modo\s+(?:de\s+)?"
+        r"(?:rendimiento|juego|maximo|potencia)$",
+        clean,
+    ):
+        return "power_profile_control", {"action": "set", "profile": "performance"}
+
+    if re.search(
+        r"^(?:pon|activa|establece|cambia\s+a)\s+(?:el\s+)?modo\s+(?:de\s+)?"
+        r"(?:ahorro(?:\s+de\s+energia)?|bateria|economico)$",
+        clean,
+    ):
+        return "power_profile_control", {"action": "set", "profile": "powersave"}
+
+    if re.search(
+        r"^(?:pon|activa|establece|cambia\s+a)\s+(?:el\s+)?modo\s+(?:de\s+)?"
+        r"(?:equilibrado|normal|estandar)$",
+        clean,
+    ):
+        return "power_profile_control", {"action": "set", "profile": "balanced"}
+
+    if re.search(
+        r"^(?:que\s+modo\s+de\s+energia\s+(?:tengo|hay)|perfil\s+de\s+energia|"
+        r"modo\s+de\s+energia)$",
+        clean,
+    ):
+        return "power_profile_control", {"action": "get"}
+
     # 20. Inspeccion y liberacion de puertos
     m_port_kill = re.search(
         r"^(?:libera|liberar|mata|matar|cierra|cerrar)\s+"
@@ -534,6 +597,32 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     )
     if m_cont_start:
         return "container_action", {"action": "start", "target": m_cont_start.group(1)}
+
+    # 21b. Monitorizacion y control del Homelab (servidor elitedesk)
+    if re.search(
+        r"^(?:como\s+esta\s+(?:el\s+)?(?:homelab|servidor)|"
+        r"estado\s+del\s+(?:homelab|servidor)|"
+        r"servicios\s+de\s+elitedesk|contenedores\s+de\s+elitedesk|"
+        r"estan\s+(?:(?:todos\s+)?los\s+)?servicios\s+de\s+elitedesk\s+levantados)$",
+        clean,
+    ):
+        return "homelab_control", {"action": "status"}
+
+    m_home_restart = re.search(
+        r"^(?:reinicia|reiniciar)\s+(?:el\s+contenedor\s+(?:de\s+)?)?([a-zA-Z0-9_.-]+)\s+"
+        r"en\s+(?:el\s+servidor|elitedesk|el\s+homelab|homelab)$",
+        clean,
+    )
+    if m_home_restart:
+        return "homelab_control", {"action": "restart", "target": m_home_restart.group(1)}
+
+    m_home_check = re.search(
+        r"^(?:como\s+esta|esta\s+levantado)\s+([a-zA-Z0-9_.-]+)\s+"
+        r"en\s+(?:el\s+servidor|elitedesk|el\s+homelab|homelab)$",
+        clean,
+    )
+    if m_home_check:
+        return "homelab_control", {"action": "check", "target": m_home_check.group(1)}
 
     # 22. Monitor de consumo (RAM / CPU) y matar procesos
     if re.search(
@@ -1014,6 +1103,20 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         action = args.get("action", "toggle")
         return "night_mode_control", {"action": action}
 
+    # 26b. Control de Bluetooth
+    if norm_name in ("bluetoothcontrol", "bluetooth"):
+        return "bluetooth_control", {
+            "action": args.get("action", "status"),
+            "device": args.get("device", ""),
+        }
+
+    # 26c. Perfiles de energia
+    if norm_name in ("powerprofilecontrol", "powerprofile", "power_profile_control", "energia"):
+        return "power_profile_control", {
+            "action": args.get("action", "set"),
+            "profile": args.get("profile", ""),
+        }
+
     # 27. Gestion e inspeccion de puertos
     if norm_name in ("portaction", "portcontrol", "port", "puerto", "checkport", "killport"):
         raw_port = args.get("port") or args.get("number") or 80
@@ -1040,6 +1143,12 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         action = args.get("action", "list")
         target = args.get("target") or args.get("name") or args.get("container", "")
         return "container_action", {"action": action, "target": target}
+
+    # 28b. Gestion y estado de servicios del Homelab (elitedesk)
+    if norm_name in ("homelabcontrol", "homelab", "homelab_control", "elitedesk"):
+        action = args.get("action", "status")
+        target = args.get("target") or args.get("name") or args.get("container", "")
+        return "homelab_control", {"action": action, "target": target}
 
     # 29. Monitor de procesos (CPU / RAM)
     if norm_name in (
@@ -1340,6 +1449,20 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         action = args.get("action", "toggle")
         return night_mode_control(action=action)
 
+    if tool_name == "bluetooth_control":
+        from jota.tools.bluetooth import bluetooth_control
+        return bluetooth_control(
+            action=args.get("action", "status"),
+            device=args.get("device", ""),
+        )
+
+    if tool_name == "power_profile_control":
+        from jota.tools.power import power_profile_control
+        return power_profile_control(
+            action=args.get("action", "set"),
+            profile=args.get("profile", ""),
+        )
+
     if tool_name == "port_action":
         from jota.tools.devops import port_action
         port = int(args.get("port", 80))
@@ -1351,6 +1474,12 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
         action = args.get("action", "list")
         target = args.get("target") or args.get("name") or args.get("container", "")
         return container_action(action=action, target=target)
+
+    if tool_name == "homelab_control":
+        from jota.tools.devops import homelab_control
+        action = args.get("action", "status")
+        target = args.get("target") or args.get("name") or args.get("container", "")
+        return homelab_control(action=action, target=target)
 
     if tool_name == "process_monitor":
         from jota.tools.devops import process_monitor_action

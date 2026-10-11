@@ -1311,11 +1311,72 @@ class TestStreamingAndDevices:
         assert ok is True
         assert "Navidrome" in msg
 
+    def test_bluetooth_fast_intents_and_execution(self):
+        assert match_fast_intent("activa el bluetooth") == ("bluetooth_control", {"action": "on"})
+        assert match_fast_intent("apaga el bluetooth") == ("bluetooth_control", {"action": "off"})
+        assert match_fast_intent("estado del bluetooth") == (
+            "bluetooth_control",
+            {"action": "status"},
+        )
+        assert match_fast_intent("conecta los auriculares") == (
+            "bluetooth_control",
+            {"action": "connect", "device": "auriculares"},
+        )
+        assert match_fast_intent("desconecta el mando") == (
+            "bluetooth_control",
+            {"action": "disconnect", "device": "mando"},
+        )
 
+        with patch("jota.tools.bluetooth._run_bluetoothctl") as mock_bt:
+            mock_bt.return_value = (0, "Powered: yes")
+            with patch("jota.tools.bluetooth._get_devices", return_value=[]):
+                ok, msg = execute_tool("bluetooth_control", {"action": "status"})
+                assert ok is True
+                assert "Bluetooth encendido" in msg
 
+    def test_power_profile_fast_intents_and_execution(self):
+        assert match_fast_intent("pon modo rendimiento") == (
+            "power_profile_control",
+            {"action": "set", "profile": "performance"},
+        )
+        assert match_fast_intent("pon modo ahorro de energia") == (
+            "power_profile_control",
+            {"action": "set", "profile": "powersave"},
+        )
+        assert match_fast_intent("pon modo equilibrado") == (
+            "power_profile_control",
+            {"action": "set", "profile": "balanced"},
+        )
+        assert match_fast_intent("que modo de energia tengo") == (
+            "power_profile_control",
+            {"action": "get"},
+        )
 
+        with patch("jota.tools.power._get_active_profile", return_value="balanced"):
+            ok, msg = execute_tool("power_profile_control", {"action": "get"})
+            assert ok is True
+            assert "balanced" in msg
 
+    def test_desktop_context_and_deictic_intents(self):
+        from jota.tools.context import get_active_context_summary, get_desktop_context
 
+        assert match_fast_intent("cierra esto") == ("close_window", {"app": ""})
+        assert match_fast_intent("maximiza esto") == ("window_action", {"action": "fullscreen"})
+
+        with patch("jota.tools.context.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout='{"class": "kitty", "title": "nvim", "workspace": {"id": 2}}',
+            )
+            ctx = get_desktop_context()
+            assert ctx["class"] == "kitty"
+            assert ctx["title"] == "nvim"
+            assert ctx["workspace"] == 2
+
+            summary = get_active_context_summary()
+            assert "kitty" in summary
+            assert "nvim" in summary
+            assert "espacio de trabajo 2" in summary
 
 
 

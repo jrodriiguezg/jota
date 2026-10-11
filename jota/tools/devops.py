@@ -401,3 +401,173 @@ def git_status_action(path: str = "") -> tuple[bool, str]:
     except Exception as e:
         logger.error("Error al consultar git status en %s: %s", repo_dir, e)
         return False, f"Error al consultar el repositorio: {e}"
+
+
+def homelab_control(action: str = "status", target: str = "") -> tuple[bool, str]:
+    """
+    Supervisa y controla los servicios del homelab (servidor elitedesk).
+    action: 'status' / 'list', 'check', 'restart', 'stop', 'start'
+    target: nombre o alias del contenedor (ej: 'navidrome', 'jota-hub')
+    """
+    import json
+    import urllib.request
+
+    from bridge.config import BRIDGE_API_KEY
+
+    clean_action = action.lower().strip()
+    clean_target = target.lower().strip()
+
+    alias_map = {
+        "musica": "navidrome",
+        "audio": "navidrome",
+        "asistente": "jota-hub",
+        "hub": "jota-hub",
+        "proxy": "caddy",
+        "audiolibros": "audiobookshelf",
+    }
+    if clean_target in alias_map:
+        clean_target = alias_map[clean_target]
+
+    server_host = os.getenv("JOTA_HOMELAB_HOST", "100.85.176.113")
+    server_port = int(os.getenv("JOTA_HOMELAB_PORT", "8765"))
+    base_url = f"http://{server_host}:{server_port}"
+
+    containers: list[dict[str, str]] | None = None
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/api/v1/homelab/containers",
+            headers={"X-Bridge-Key": BRIDGE_API_KEY},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                containers = data.get("containers", [])
+    except Exception as e:
+        logger.debug("Fallo al conectar con Homelab Hub via REST (%s): %s", base_url, e)
+
+    if containers is None and shutil.which("ssh"):
+        try:
+            ssh_proc = subprocess.run(
+                [
+                    "ssh",
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "ConnectTimeout=3",
+                    "elitedesk",
+                    "docker ps -a --format '{{json .}}'",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if ssh_proc.returncode == 0 and ssh_proc.stdout.strip():
+                containers = []
+                for line in ssh_proc.stdout.strip().splitlines():
+                    if line.strip():
+                        try:
+                            c = json.loads(line)
+                            containers.append({
+                                "name": c.get("Names", ""),
+                                "image": c.get("Image", ""),
+                                "status": c.get("Status", ""),
+                                "state": c.get("State", ""),
+                            })
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.debug("Fallo fallback SSH a elitedesk: %s", e)
+
+    if containers is None:
+        return False, "No pude conectar con el servidor elitedesk para verificar los servicios."
+
+    if clean_action in (
+        "restart",
+        "reiniciar",
+        "reinicia",
+        "start",
+        "arrancar",
+        "stop",
+        "detener",
+    ):
+        if not clean_target:
+            return False, "Debes especificar que contenedor deseas modificar."
+
+        match_cont = None
+        for c in containers:
+            if clean_target in c["name"].lower():
+                match_cont = c["name"]
+                break
+
+        target_to_run = match_cont or clean_target
+        op = "restart"
+        if clean_action in ("start", "arrancar"):
+            op = "start"
+        elif clean_action in ("stop", "detener"):
+            op = "stop"
+
+        try:
+            payload = json.dumps({"name": target_to_run, "action": op}).encode("utf-8")
+            req = urllib.request.Request(
+                f"{base_url}/api/v1/homelab/container",
+                data=payload,
+                headers={"X-Bridge-Key": BRIDGE_API_KEY, "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    return True, f"Contenedor '{target_to_run}' {op} con exito en elitedesk."
+        except Exception:
+            if shutil.which("ssh"):
+                try:
+                    ssh_res = subprocess.run(
+                        [
+                            "ssh",
+                            "-o",
+                            "BatchMode=yes",
+                            "-o",
+                            "ConnectTimeout=3",
+                            "elitedesk",
+                            f"docker {op} {target_to_run}",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=12,
+                        check=False,
+                    )
+                    if ssh_res.returncode == 0:
+                        return True, f"Contenedor '{target_to_run}' {op} con exito en elitedesk."
+                except Exception:
+                    pass
+
+        return False, f"No se pudo ejecutar la accion '{op}' en '{target_to_run}'."
+
+    if clean_target:
+        found = [c for c in containers if clean_target in c["name"].lower()]
+        if not found:
+            return False, f"No encontre ningun contenedor llamado '{target}' en elitedesk."
+        c = found[0]
+        st = c.get("status", "desconocido")
+        return True, f"El servicio '{c['name']}' en elitedesk esta: {st}."
+
+    total = len(containers)
+    running = [
+        c["name"]
+        for c in containers
+        if "up" in c.get("status", "").lower() or c.get("state") == "running"
+    ]
+    stopped = [c["name"] for c in containers if c["name"] not in running]
+
+    if stopped:
+        return (
+            True,
+            f"En elitedesk hay {len(running)} contenedores activos y {len(stopped)} detenidos. "
+            f"Activos: {', '.join(running[:5])}. Detenidos: {', '.join(stopped)}.",
+        )
+    return (
+        True,
+        f"Todos los servicios de elitedesk estan levantados. Hay {total} contenedores activos: "
+        f"{', '.join(running[:5])}.",
+    )

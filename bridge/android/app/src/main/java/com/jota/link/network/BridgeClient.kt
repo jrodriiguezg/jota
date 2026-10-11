@@ -471,6 +471,42 @@ class BridgeClient(
         executePcAction("open_url:$url")
     }
 
+    suspend fun analyzeImage(
+        imageBytes: ByteArray,
+        prompt: String = "Que ves en esta imagen?"
+    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        try {
+            executeWithFallback { currentUrl ->
+                val requestBody = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart(
+                        "file",
+                        "mobile_capture.jpg",
+                        imageBytes.toRequestBody("image/jpeg".toMediaType())
+                    )
+                    .addFormDataPart("question", prompt)
+                    .build()
+
+                val request = Request.Builder()
+                    .url("$currentUrl/api/v1/vision/analyze")
+                    .header("X-Bridge-Key", apiKey)
+                    .post(requestBody)
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val json = JSONObject(response.body?.string() ?: "{}")
+                    val desc = json.optString("description", "Sin descripcion disponible.")
+                    Pair(true, desc)
+                } else {
+                    Pair(false, "Error del servidor: ${response.code}")
+                }
+            }
+        } catch (e: Exception) {
+            Pair(false, e.message ?: "Fallo de conexion al analizar imagen")
+        }
+    }
+
     fun disconnect() {
         webSocket?.close(1000, "App closed")
         webSocket = null

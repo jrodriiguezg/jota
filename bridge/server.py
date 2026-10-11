@@ -6,7 +6,11 @@ con dispositivos Android.
 
 import asyncio
 import hmac
+import json
 import logging
+import re
+import shutil
+import subprocess
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -294,6 +298,11 @@ class MediaHandoffPayload(BaseModel):
     device_id: str | None = None
 
 
+class HomelabContainerActionPayload(BaseModel):
+    name: str
+    action: str = "restart"
+
+
 
 # ── Endpoints de Salud y Estado ──────────────────────────────────────────────
 
@@ -452,6 +461,124 @@ def bridge_pairing():
     """Obtiene los parametros de emparejamiento con el PC para la app Android."""
     from bridge.qr import get_pairing_payload
     return get_pairing_payload()
+
+
+@app.get("/api/v1/homelab/containers", dependencies=[Depends(verify_auth)])
+def homelab_list_containers():
+    """Lista todos los contenedores Docker o Podman y su estado en el host."""
+    engine = shutil.which("docker") or shutil.which("podman")
+    if not engine:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Docker o Podman no esta disponible en este host.",
+        )
+
+    try:
+        res = subprocess.run(
+            [engine, "ps", "-a", "--format", "{{json .}}"],
+            capture_output=True,
+            text=True,
+            timeout=6,
+            check=False,
+        )
+        if res.returncode != 0:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error al listar contenedores: {res.stderr.strip()}",
+            )
+
+        containers = []
+        for line in res.stdout.strip().splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    c = json.loads(line)
+                    containers.append({
+                        "name": c.get("Names", ""),
+                        "image": c.get("Image", ""),
+                        "status": c.get("Status", ""),
+                        "state": c.get("State", ""),
+                    })
+                except Exception:
+                    pass
+        return {"containers": containers, "count": len(containers)}
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Tiempo de espera agotado al consultar contenedores.",
+        )
+    except Exception as e:
+        logger.error("Error en homelab_list_containers: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.post("/api/v1/homelab/container", dependencies=[Depends(verify_auth)])
+def homelab_container_action(payload: HomelabContainerActionPayload):
+    """Ejecuta una accion (start, stop, restart) sobre un contenedor del homelab."""
+    clean_name = payload.name.strip()
+    clean_action = payload.action.strip().lower()
+
+    if not re.match(r"^[a-zA-Z0-9_\-\.]+$", clean_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nombre de contenedor invalido. Solo caracteres alfanumericos y guiones.",
+        )
+
+    if clean_action not in ("start", "stop", "restart"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Accion no permitida. Solo 'start', 'stop' o 'restart'.",
+        )
+
+    engine = shutil.which("docker") or shutil.which("podman")
+    if not engine:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Docker o Podman no disponible.",
+        )
+
+    try:
+        res = subprocess.run(
+            [engine, clean_action, clean_name],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if res.returncode == 0:
+            return {
+                "success": True,
+                "message": f"Contenedor '{clean_name}' {clean_action} ejecutado con exito.",
+            }
+        return {
+            "success": False,
+            "message": res.stderr.strip() or f"Error ejecutando {clean_action} en '{clean_name}'.",
+        }
+    except Exception as e:
+        logger.error("Error en homelab_container_action: %s", e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.post("/api/v1/vision/analyze", dependencies=[Depends(verify_auth)])
+async def analyze_mobile_image(
+    file: UploadFile = File(...),
+    question: str = Form("Que ves en esta imagen?"),
+):
+    """
+    Recibe una imagen o fotografia tomada desde el movil y la analiza con el modelo de vision.
+    Devuelve la descripcion textual sintetizada.
+    """
+    image_bytes = await file.read()
+    if not image_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Archivo de imagen vacio.",
+        )
+
+    from jota.tools.screen_vision import query_vision_model
+
+    ok, answer = query_vision_model(image_bytes, question=question)
+    return {"success": ok, "description": answer}
 
 
 @app.get("/api/v1/pc/file", dependencies=[Depends(verify_auth)])

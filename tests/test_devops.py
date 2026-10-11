@@ -391,3 +391,45 @@ class TestDevOpsRouterIntegration:
             ok, msg = execute_tool("git_status", {})
             assert ok is True
             assert "Repo limpio" in msg
+
+        with patch("jota.tools.devops.homelab_control") as mock_home:
+            mock_home.return_value = (True, "Servicios levantados.")
+            ok, msg = execute_tool("homelab_control", {"action": "status"})
+            assert ok is True
+            assert "Servicios levantados" in msg
+
+    def test_homelab_fast_intents(self):
+        assert match_fast_intent("como esta el homelab") == (
+            "homelab_control",
+            {"action": "status"},
+        )
+        assert match_fast_intent("estan los servicios de elitedesk levantados") == (
+            "homelab_control",
+            {"action": "status"},
+        )
+        assert match_fast_intent("reinicia navidrome en el servidor") == (
+            "homelab_control",
+            {"action": "restart", "target": "navidrome"},
+        )
+        assert match_fast_intent("esta levantado caddy en el servidor") == (
+            "homelab_control",
+            {"action": "check", "target": "caddy"},
+        )
+
+    @patch("urllib.request.urlopen")
+    def test_homelab_control_rest_success(self, mock_urlopen):
+        from jota.tools.devops import homelab_control
+
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = (
+            b'{"containers": [{"name": "jota-hub", "status": "Up 2 hours", "state": "running"},'
+            b'{"name": "navidrome", "status": "Up 3 days", "state": "running"}]}'
+        )
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        ok, msg = homelab_control("status")
+        assert ok is True
+        assert "Todos los servicios de elitedesk estan levantados" in msg
+        assert "jota-hub" in msg

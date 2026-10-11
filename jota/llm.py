@@ -161,8 +161,22 @@ def get_effective_system_prompt() -> str:
         f"Contexto temporal del sistema: Hoy es {dia_semana}, {now.day} de {mes} de {now.year}. "
         f"Hora local actual: {now.strftime('%H:%M')}."
     )
+
+    desktop_info = ""
+    try:
+        from jota.tools.context import get_active_context_summary
+
+        desktop_info = get_active_context_summary()
+    except Exception:
+        pass
+
+    ctx_parts = [time_info]
+    if desktop_info:
+        ctx_parts.append(f"Contexto visual del escritorio Hyprland: {desktop_info}.")
+
+    context_str = " ".join(ctx_parts)
     directive = "/think" if LLM_ENABLE_THINKING else "/no_think"
-    prompt = f"{SYSTEM_PROMPT}\n\n{time_info}"
+    prompt = f"{SYSTEM_PROMPT}\n\n{context_str}"
     if directive in prompt:
         return prompt
     return f"{prompt}\n{directive}"
