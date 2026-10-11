@@ -302,6 +302,33 @@ def health_check():
     }
 
 
+@app.get("/download/jotalink.apk")
+@app.get("/api/v1/download/apk")
+def download_apk():
+    """Descarga directa del paquete APK de JotaLink para Android."""
+    candidate_paths = [
+        Path("data/jotalink.apk"),
+        Path("/app/data/jotalink.apk"),
+        Path(__file__).parent / "android/app/build/outputs/apk/debug/app-debug.apk",
+        Path(__file__).parent.parent / "bridge/android/app/build/outputs/apk/debug/app-debug.apk",
+        Path("bridge/android/app/build/outputs/apk/debug/app-debug.apk"),
+    ]
+    for p in candidate_paths:
+        if p.is_file():
+            return FileResponse(
+                path=str(p),
+                media_type="application/vnd.android.package-archive",
+                filename="JotaLink.apk",
+            )
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            "APK no encontrado en el servidor. Compile con ./gradlew assembleDebug "
+            "o deposite el binario en data/jotalink.apk."
+        ),
+    )
+
+
 # ── Endpoints de Control y Operaciones del PC ────────────────────────────────
 
 
