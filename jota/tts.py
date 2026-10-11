@@ -6,7 +6,10 @@ import tempfile
 import threading
 from pathlib import Path
 
-import sounddevice as sd
+try:
+    import sounddevice as sd
+except Exception:
+    sd = None
 import soundfile as sf
 
 from jota.config import PIPER_BIN, PIPER_MODEL
@@ -82,6 +85,9 @@ def speak(text: str) -> None:
 
 def play_wav(path: Path, block: bool = True) -> None:
     """Reproduce un archivo WAV por los altavoces del sistema."""
+    if sd is None:
+        logger.debug("sounddevice no disponible para reproduccion local.")
+        return
     try:
         data, samplerate = sf.read(str(path), dtype="float32")
         logger.debug("Reproduciendo respuesta (%.2fs)...", len(data) / samplerate)

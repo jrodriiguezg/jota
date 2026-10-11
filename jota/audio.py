@@ -8,7 +8,11 @@ import wave
 from pathlib import Path
 
 import numpy as np
-import sounddevice as sd
+
+try:
+    import sounddevice as sd
+except Exception:
+    sd = None
 
 from jota.config import (
     AUDIO_CHANNELS,
