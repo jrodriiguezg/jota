@@ -97,6 +97,8 @@ docker compose logs -f
 | `POST` | `/api/v1/nodes/heartbeat` | Latido periodico de salud y recursos de satelites | `X-Jota-Token` |
 | `POST` | `/api/v1/telemetry/report` | Envio de metricas y contenedores desde satelites | `X-Jota-Token` |
 | `POST` | `/api/v1/assistant/query` | Procesamiento de intenciones y consultas del LLM | `X-Jota-Token` |
+| `GET` | `/api/v1/nodes/list` | Catalogo de satelites registrados y estado en vivo | `X-Jota-Token` |
+| `GET` | `/api/v1/homelab/cluster_status` | Resumen consolidado de salud, hardware y GPU del cluster | `X-Jota-Token` |
 | `GET` | `/api/v1/homelab/containers`| Listado de contenedores de todos los servidores | `X-Jota-Token` |
 | `GET` | `/download/jotalink.apk` | Descarga directa de la app Android JotaLink | Opcional |
 
@@ -104,7 +106,7 @@ docker compose logs -f
 
 ## 5. Mantenimiento y Backups
 
-- **Base de datos y estado**: Se conserva en el volumen local mapeado en `./data/jota.db`.
+- **Base de datos y estado**: Se conserva en el volumen local mapeado en `./data/jota.db` con permisos estrictos `0600`.
 - **Copia de seguridad**:
   ```bash
   # Crear backup consistente con SQLite online
@@ -115,3 +117,21 @@ docker compose logs -f
   docker compose pull
   docker compose up -d --remove-orphans
   ```
+
+---
+
+## 6. Verificacion y Pruebas
+
+Para validar el funcionamiento del Hub, la base de datos y la orquestacion de tareas:
+
+```bash
+# Comprobar estado de salud del Hub via HTTP
+curl -s http://localhost:8765/health | jq .
+
+# Consultar el estado del cluster consolidado
+curl -s -H "X-Jota-Token: tu_token_secreto" http://localhost:8765/api/v1/homelab/cluster_status | jq .
+
+# Ejecutar bateria de pruebas automatizadas del Hub
+pytest tests/test_hub_db.py tests/test_hub_endpoints.py tests/test_cluster_tools.py -q
+```
+
