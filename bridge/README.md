@@ -77,6 +77,9 @@ python bridge/test_client.py screenshot --out captura_pc.png
 
 # 5. Descargar un archivo del PC
 python bridge/test_client.py file README.md --out readme_descargado.md
+
+# 6. Ejecutar bateria de pruebas automatizadas del Bridge
+pytest tests/test_bridge.py -q
 ```
 
 ---

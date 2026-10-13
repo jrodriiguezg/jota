@@ -15,6 +15,7 @@ Aplicacion companera para Android que conecta tu telefono con tu PC (Jota) a tra
    - **Captura de Pantalla remota:** Toma una captura en Wayland (`grim`) y la muestra en la pantalla del telefono al instante.
    - **Sincronizacion de Portapapeles:** Lee el portapapeles del PC o envia texto directamente al portapapeles de Wayland (`wl-copy` / `wl-paste`).
    - **Descarga de Archivos:** Descarga cualquier archivo permitido del PC indicando su ruta.
+   - **Supervision del Cluster Homelab:** Consulta centralizada de satelites, salud general y estado de aceleracion GPU mediante `getClusterStatus()` y `getClusterNodes()`.
 
 3. **Control del Telefono desde el PC por Voz:**
    - *"Jota, encuentra mi movil"* -> El telefono suena al maximo volumen en el canal de alarma (incluso en silencio o no molestar) y vibra de forma continua hasta ser descartado.
@@ -42,8 +43,8 @@ En la pantalla de Ajustes de la aplicacion configura:
 
 1. **Servidor Tailscale:**
    - IP de Tailscale de tu PC (ejemplo: `http://100.x.y.z:8765` o `http://pc-jota:8765`).
-2. **API Key:**
-   - Clave precompartida definida en el PC (`JOTA_BRIDGE_API_KEY`, por defecto `jota-secret-tailscale-key`).
+2. **API Key / Token:**
+   - Clave precompartida definida en el Hub o PC (`JOTA_BRIDGE_API_KEY`, transmitida via `X-Jota-Token` y `X-Bridge-Key`).
 3. **ID de Dispositivo:**
    - Nombre identificativo para tu telefono (ejemplo: `pixel8_jota`).
 

@@ -47,6 +47,7 @@ La comunicacion movil con el ecosistema se realiza exclusivamente sobre redes pr
 | `GET` | `/api/v1/clipboard` | Obtener contenido actual del portapapeles del cluster | `X-Jota-Token` |
 | `POST` | `/api/v1/clipboard` | Enviar texto desde el movil al portapapeles del escritorio | `X-Jota-Token` |
 | `GET` | `/api/v1/homelab/containers` | Lista de contenedores y salud de los servidores | `X-Jota-Token` |
+| `GET` | `/api/v1/homelab/cluster_status` | Resumen consolidado del homelab y servidores | `X-Jota-Token` |
 | `GET` | `/api/v1/nodes/list` | Lista de satelites registrados y estado en vivo | `X-Jota-Token` |
 | `POST` | `/api/v1/scenes/execute` | Disparar una escena sobre uno o mas satelites | `X-Jota-Token` |
 | `WS` | `/ws/mobile` | Canal bidireccional para eventos push y portapapeles | `X-Jota-Token` |
@@ -114,9 +115,16 @@ systemctl --user enable --now jota-bridge.service
 Para verificar que el servicio Bridge y sus endpoints responden adecuadamente:
 
 ```bash
-# Ejecutar verificacion de estado local
-python3 -m bridge.cli status
+# Simular un telefono Android conectado (recibe comandos y reporta bateria)
+python3 bridge/test_client.py simulate-phone --battery 85
 
-# Ejecutar bateria de pruebas de integracion
-pytest tests/test_bridge_api.py -q
+# Consultar el estado y recursos reportados
+python3 bridge/test_client.py status
+
+# Comprobar salud del servicio HTTP
+curl -s http://localhost:8765/health | jq .
+
+# Ejecutar bateria de pruebas automatizadas del Bridge
+pytest tests/test_bridge.py -q
 ```
+
