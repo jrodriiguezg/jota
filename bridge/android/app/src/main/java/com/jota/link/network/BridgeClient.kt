@@ -485,6 +485,24 @@ class BridgeClient(
         executePcAction("open_url:$url")
     }
 
+    suspend fun getHealth(): JSONObject? = withContext(Dispatchers.IO) {
+        try {
+            executeWithFallback { currentUrl ->
+                val request = Request.Builder()
+                    .url("$currentUrl/health")
+                    .get()
+                    .build()
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: "{}"
+                    JSONObject(body)
+                } else null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     suspend fun getClusterStatus(): JSONObject? = withContext(Dispatchers.IO) {
         try {
             executeWithFallback { currentUrl ->
@@ -522,6 +540,25 @@ class BridgeClient(
             }
         } catch (e: Exception) {
             null
+        }
+    }
+
+    suspend fun testServerConnection(): Triple<Boolean, Long, String> = withContext(Dispatchers.IO) {
+        val start = System.currentTimeMillis()
+        try {
+            val health = getHealth()
+            val latency = System.currentTimeMillis() - start
+            if (health != null) {
+                val status = health.optString("status", "online")
+                val role = health.optString("cluster_role", "hub")
+                val nodesOnline = health.optInt("nodes_online", 0)
+                Triple(true, latency, "Estado: $status | Rol: $role | Nodos activos: $nodesOnline")
+            } else {
+                Triple(false, latency, "El servidor no respondio al health check")
+            }
+        } catch (e: Exception) {
+            val latency = System.currentTimeMillis() - start
+            Triple(false, latency, e.message ?: "Fallo de conexion de red")
         }
     }
 
