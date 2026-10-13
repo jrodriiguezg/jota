@@ -11,6 +11,7 @@ import hashlib
 import os
 import platform
 import socket
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -210,10 +211,24 @@ def is_tailscale_interface_present() -> bool:
     return Path("/sys/class/net/tailscale0").exists()
 
 
+def get_tailscale_ip() -> str:
+    """Obtiene la IP asignada por Tailscale si esta activa."""
+    try:
+        res = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=2)
+        if res.returncode == 0:
+            ip = res.stdout.strip()
+            if ip and not ip.startswith("127."):
+                return ip
+    except Exception:
+        pass
+    return ""
+
+
 def get_node_metadata() -> dict[str, Any]:
     """
     Recopila metadatos del nodo actual para registro y diagnostico en el Hub.
     """
+    ts_ip = get_tailscale_ip()
     return {
         "node_id": get_node_id(),
         "hostname": socket.gethostname(),
@@ -221,6 +236,7 @@ def get_node_metadata() -> dict[str, Any]:
         "release": platform.release(),
         "arch": platform.machine(),
         "python_version": platform.python_version(),
-        "has_tailscale": is_tailscale_interface_present(),
+        "has_tailscale": is_tailscale_interface_present() or bool(ts_ip),
+        "tailscale_ip": ts_ip,
         "mac_primary": get_primary_mac_address(),
     }

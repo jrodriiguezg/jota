@@ -304,6 +304,7 @@ class SatelliteClient:
             "is_gpu_worker": self.config.is_gpu_worker,
             "gpu_info": self.config.gpu_info,
             "metadata": self.metadata,
+            "preferred_ip": self.metadata.get("tailscale_ip", ""),
         }
         try:
             res = await client.post(url, json=payload, headers=self.auth_headers, timeout=10.0)
@@ -326,6 +327,7 @@ class SatelliteClient:
             "hardware_fingerprint": self.hardware_fingerprint,
             "is_gpu_worker": self.config.is_gpu_worker,
             "gpu_info": self.config.gpu_info,
+            "preferred_ip": self.metadata.get("tailscale_ip", ""),
         }
         try:
             res = await client.post(url, json=payload, headers=self.auth_headers, timeout=8.0)
