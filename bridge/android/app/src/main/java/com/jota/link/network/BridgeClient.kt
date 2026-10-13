@@ -199,6 +199,7 @@ class BridgeClient(
 
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/voice/ask")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .post(requestBody)
                 .build()
@@ -222,6 +223,7 @@ class BridgeClient(
             }
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/text/ask")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .post(json.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -236,6 +238,7 @@ class BridgeClient(
         executeWithFallback { currentUrl ->
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/audio/$audioId")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .get()
                 .build()
@@ -263,6 +266,7 @@ class BridgeClient(
             val json = JSONObject().apply { put("action", action) }
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/pc/action")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .post(json.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -279,6 +283,7 @@ class BridgeClient(
         executeWithFallback { currentUrl ->
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/pc/status")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .get()
                 .build()
@@ -297,6 +302,7 @@ class BridgeClient(
         executeWithFallback { currentUrl ->
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/pc/screenshot?format=$format&quality=$quality&scale=$scale")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .get()
                 .build()
@@ -310,6 +316,7 @@ class BridgeClient(
         executeWithFallback { currentUrl ->
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/pc/screenshots")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .get()
                 .build()
@@ -331,6 +338,7 @@ class BridgeClient(
             val encoded = java.net.URLEncoder.encode(nameOrPath, "UTF-8")
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/pc/screenshots/file?name=$encoded")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .get()
                 .build()
@@ -344,6 +352,7 @@ class BridgeClient(
         executeWithFallback { currentUrl ->
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/pc/screenshots/capture")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .post("{}".toRequestBody("application/json".toMediaType()))
                 .build()
@@ -364,6 +373,7 @@ class BridgeClient(
         executeWithFallback { currentUrl ->
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/pc/clipboard")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .get()
                 .build()
@@ -379,6 +389,7 @@ class BridgeClient(
             val json = JSONObject().apply { put("text", text) }
             val request = Request.Builder()
                 .url("$currentUrl/api/v1/pc/clipboard")
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .post(json.toString().toRequestBody("application/json".toMediaType()))
                 .build()
@@ -404,7 +415,8 @@ class BridgeClient(
             executeWithFallback { currentUrl ->
                 val request = Request.Builder()
                     .url("$currentUrl/api/v1/pc/network")
-                    .header("X-Bridge-Key", apiKey)
+                    .header("X-Jota-Token", apiKey)
+                .header("X-Bridge-Key", apiKey)
                     .get()
                     .build()
                 val response = httpClient.newCall(request).execute()
@@ -421,6 +433,7 @@ class BridgeClient(
             val url = "$currentUrl/api/v1/pc/file?path=${java.net.URLEncoder.encode(remotePath, "UTF-8")}"
             val request = Request.Builder()
                 .url(url)
+                .header("X-Jota-Token", apiKey)
                 .header("X-Bridge-Key", apiKey)
                 .get()
                 .build()
@@ -451,7 +464,8 @@ class BridgeClient(
 
                 val request = Request.Builder()
                     .url("$currentUrl/api/v1/pc/upload")
-                    .header("X-Bridge-Key", apiKey)
+                    .header("X-Jota-Token", apiKey)
+                .header("X-Bridge-Key", apiKey)
                     .post(requestBody)
                     .build()
 
@@ -469,6 +483,46 @@ class BridgeClient(
 
     suspend fun openUrlOnPc(url: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         executePcAction("open_url:$url")
+    }
+
+    suspend fun getClusterStatus(): JSONObject? = withContext(Dispatchers.IO) {
+        try {
+            executeWithFallback { currentUrl ->
+                val request = Request.Builder()
+                    .url("$currentUrl/api/v1/homelab/cluster_status")
+                    .header("X-Jota-Token", apiKey)
+                    .header("X-Bridge-Key", apiKey)
+                    .get()
+                    .build()
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: "{}"
+                    JSONObject(body)
+                } else null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    suspend fun getClusterNodes(): JSONObject? = withContext(Dispatchers.IO) {
+        try {
+            executeWithFallback { currentUrl ->
+                val request = Request.Builder()
+                    .url("$currentUrl/api/v1/nodes/list")
+                    .header("X-Jota-Token", apiKey)
+                    .header("X-Bridge-Key", apiKey)
+                    .get()
+                    .build()
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: "{}"
+                    JSONObject(body)
+                } else null
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     fun disconnect() {
