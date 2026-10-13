@@ -44,6 +44,7 @@ from bridge.config import (
     BRIDGE_TEMP_DIR,
     ENABLE_AUTO_ADB_REVERSE,
     ENABLE_MDNS_DISCOVERY,
+    HUB_DB_PATH,
     MAX_FILE_UPLOAD_BYTES,
 )
 from bridge.pc_ops import (
@@ -59,9 +60,14 @@ from bridge.pc_ops import (
 )
 from bridge.phone_manager import phone_manager
 from bridge.voice_pipeline import process_remote_text, process_remote_voice
+from jota.hub_db import HubDatabase
+from jota.security import is_safe_cluster_ip
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("jota.bridge")
+
+# Inicializacion de la base de datos persistente del Hub
+hub_db = HubDatabase(HUB_DB_PATH, secret_key=BRIDGE_API_KEY)
 
 # Registro en memoria de intentos fallidos de autenticacion: ip -> lista de timestamps
 _failed_auth_log: dict[str, list[float]] = {}
@@ -211,12 +217,21 @@ app.add_middleware(
 
 def verify_auth(
     request: Request = None,
+    x_jota_token: str | None = Header(None, alias="X-Jota-Token"),
     x_bridge_key: str | None = Header(None, alias="X-Bridge-Key"),
     authorization: str | None = Header(None, alias="Authorization"),
 ) -> None:
     """Valida la clave secreta enviada en cabecera HTTP con proteccion contra fuerza bruta."""
     client_ip = (request.client.host if request and request.client else "unknown")
     now = time.time()
+
+    # Validacion de seguridad de origen de red (LAN privada, Tailscale o loopback)
+    if client_ip != "unknown" and not is_safe_cluster_ip(client_ip):
+        logger.warning("Intento de conexion denegado desde IP externa no segura: %s", client_ip)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso restringido: las peticiones deben provenir de la red local o Tailscale.",
+        )
 
     # Comprobar intentos fallidos previos para esta IP
     attempts = _failed_auth_log.get(client_ip, [])
@@ -234,7 +249,9 @@ def verify_auth(
         )
 
     token = None
-    if x_bridge_key:
+    if x_jota_token:
+        token = x_jota_token
+    elif x_bridge_key:
         token = x_bridge_key
     elif authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
@@ -265,6 +282,38 @@ class TextPromptPayload(BaseModel):
     prompt: str
     generate_audio: bool = False
     play_on_pc: bool = False
+    prefer_gpu: bool = False
+
+
+class NodeRegisterPayload(BaseModel):
+    node_id: str
+    name: str
+    mode: str = "desktop"
+    hardware_fingerprint: str
+    port: int = 8765
+    is_gpu_worker: bool = False
+    gpu_info: str = ""
+    metadata: dict[str, Any] = {}
+
+
+class NodeHeartbeatPayload(BaseModel):
+    node_id: str
+    hardware_fingerprint: str | None = None
+    is_gpu_worker: bool | None = None
+    gpu_info: str | None = None
+
+
+class NodeTelemetryPayload(BaseModel):
+    node_id: str
+    hardware_fingerprint: str | None = None
+    cpu_percent: float = 0.0
+    ram_percent: float = 0.0
+    ram_used_mb: float = 0.0
+    ram_total_mb: float = 0.0
+    disk_percent: float = 0.0
+    disk_free_gb: float = 0.0
+    containers: list[dict[str, Any]] = []
+    systemd_services: list[str] = []
 
 
 class RingPhonePayload(BaseModel):
@@ -310,11 +359,90 @@ class HomelabContainerActionPayload(BaseModel):
 @app.get("/health")
 @app.get("/api/v1/health")
 def health_check():
-    """Comprobacion de estado del servicio Bridge."""
+    """Comprobacion de estado del servicio Jota Hub."""
+    nodes = hub_db.list_nodes()
     return {
         "status": "online",
         "service": "jota-bridge",
+        "cluster_role": "hub",
+        "hub_mode": True,
+        "nodes_total": len(nodes),
+        "nodes_online": sum(1 for n in nodes if n["status"] == "online"),
+        "gpu_worker_available": hub_db.get_active_gpu_worker() is not None,
         "connected_phones": len(phone_manager.list_connected_devices()),
+    }
+
+
+# ── Endpoints del Cluster de Nodos y Satelites ──────────────────────────────
+
+
+@app.post("/api/v1/nodes/register", dependencies=[Depends(verify_auth)])
+def register_node(payload: NodeRegisterPayload, request: Request):
+    """
+    Registra o actualiza un satelite en el cluster.
+    Comprueba que la huella de hardware coincida para evitar suplantaciones.
+    """
+    client_ip = request.client.host if request and request.client else "127.0.0.1"
+    ok, msg = hub_db.register_or_update_node(
+        node_id=payload.node_id,
+        name=payload.name,
+        mode=payload.mode,
+        hardware_fingerprint=payload.hardware_fingerprint,
+        ip_address=client_ip,
+        port=payload.port,
+        is_gpu_worker=payload.is_gpu_worker,
+        gpu_info=payload.gpu_info,
+        metadata=payload.metadata,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"status": "ok", "message": msg, "node_id": payload.node_id}
+
+
+@app.post("/api/v1/nodes/heartbeat", dependencies=[Depends(verify_auth)])
+def node_heartbeat(payload: NodeHeartbeatPayload, request: Request):
+    """Registra latido periodico de salud y disponibilidad del nodo."""
+    client_ip = request.client.host if request and request.client else "127.0.0.1"
+    ok = hub_db.record_heartbeat(
+        node_id=payload.node_id,
+        ip_address=client_ip,
+        is_gpu_worker=payload.is_gpu_worker,
+        gpu_info=payload.gpu_info,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Nodo no registrado previamente.")
+    return {"status": "ok", "node_id": payload.node_id}
+
+
+@app.post("/api/v1/telemetry/report", dependencies=[Depends(verify_auth)])
+def report_telemetry(payload: NodeTelemetryPayload):
+    """Almacena reporte de telemetria de recursos y contenedores de un nodo."""
+    ok = hub_db.record_telemetry(payload.node_id, payload.model_dump())
+    if not ok:
+        raise HTTPException(status_code=404, detail="Nodo no encontrado para registrar telemetria.")
+    return {"status": "ok"}
+
+
+@app.get("/api/v1/nodes/list", dependencies=[Depends(verify_auth)])
+def list_nodes():
+    """Devuelve listado de todos los nodos del cluster y su estado de conectividad."""
+    return {"nodes": hub_db.list_nodes()}
+
+
+@app.get("/api/v1/homelab/cluster_status", dependencies=[Depends(verify_auth)])
+def cluster_status():
+    """Resumen consolidado de salud del cluster, servidores y contenedores."""
+    nodes = hub_db.list_nodes()
+    containers = hub_db.get_all_containers_summary()
+    gpu_worker = hub_db.get_active_gpu_worker()
+    return {
+        "nodes_total": len(nodes),
+        "nodes_online": sum(1 for n in nodes if n["status"] == "online"),
+        "nodes": nodes,
+        "gpu_worker_available": gpu_worker is not None,
+        "gpu_worker": gpu_worker,
+        "containers_total": len(containers),
+        "containers": containers,
     }
 
 
@@ -740,11 +868,41 @@ async def ask_voice(
     return result
 
 
+@app.post("/api/v1/assistant/query", dependencies=[Depends(verify_auth)])
 @app.post("/api/v1/text/ask", dependencies=[Depends(verify_auth)])
-def ask_text(payload: TextPromptPayload):
+async def ask_text(payload: TextPromptPayload):
     """
-    Consulta escrita directa a Jota desde el movil.
+    Consulta escrita al asistente Jota.
+    Si hay un servidor secundario con GPU activo, delega la inferencia a dicho worker.
+    Si el worker falla o esta desconectado, asume la inferencia localmente en el Hub.
     """
+    gpu_worker = hub_db.get_active_gpu_worker()
+    if gpu_worker and (payload.prefer_gpu or len(payload.prompt) > 80):
+        worker_url = f"http://{gpu_worker['ip_address']}:{gpu_worker['port']}/api/v1/text/ask"
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                res = await client.post(
+                    worker_url,
+                    json={
+                        "prompt": payload.prompt,
+                        "generate_audio": payload.generate_audio,
+                        "play_on_pc": False,
+                    },
+                    headers={"X-Jota-Token": str(BRIDGE_API_KEY)},
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    data["offloaded_to_worker"] = gpu_worker["name"]
+                    return data
+        except Exception as e:
+            logger.warning(
+                "Fallo al delegar al servidor secundario con GPU (%s): %s. Ejecutando localmente.",
+                gpu_worker["name"],
+                e,
+            )
+
     result = process_remote_text(
         payload.prompt,
         generate_audio=payload.generate_audio,
