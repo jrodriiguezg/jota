@@ -186,8 +186,8 @@ configure_systemd() {
 [Unit]
 Description=$desc
 Documentation=https://github.com/jrodriiguezg/jota
-After=network-online.target pipewire.service wireplumber.service
-Wants=network-online.target pipewire.service wireplumber.service
+After=graphical-session.target pipewire.service wireplumber.service
+Wants=pipewire.service wireplumber.service
 PartOf=graphical-session.target
 
 [Service]
@@ -206,7 +206,7 @@ StandardError=journal
 SyslogIdentifier=jota
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target default.target
 EOF
 
     systemctl --user daemon-reload
