@@ -316,6 +316,7 @@ class NodeRegisterPayload(BaseModel):
     port: int = 8765
     is_gpu_worker: bool = False
     gpu_info: str = ""
+    preferred_ip: str | None = None
     metadata: dict[str, Any] = {}
 
 
@@ -324,6 +325,7 @@ class NodeHeartbeatPayload(BaseModel):
     hardware_fingerprint: str | None = None
     is_gpu_worker: bool | None = None
     gpu_info: str | None = None
+    preferred_ip: str | None = None
 
 
 class NodeTelemetryPayload(BaseModel):
@@ -406,6 +408,10 @@ def register_node(payload: NodeRegisterPayload, request: Request):
     Comprueba que la huella de hardware coincida para evitar suplantaciones.
     """
     client_ip = request.client.host if request and request.client else "127.0.0.1"
+    preferred = payload.preferred_ip or (payload.metadata.get("tailscale_ip") if payload.metadata else None)
+    if preferred and (client_ip.startswith("172.") or client_ip.startswith("192.168.128.") or client_ip == "127.0.0.1"):
+        client_ip = preferred
+
     ok, msg = hub_db.register_or_update_node(
         node_id=payload.node_id,
         name=payload.name,
@@ -426,6 +432,9 @@ def register_node(payload: NodeRegisterPayload, request: Request):
 def node_heartbeat(payload: NodeHeartbeatPayload, request: Request):
     """Registra latido periodico de salud y disponibilidad del nodo."""
     client_ip = request.client.host if request and request.client else "127.0.0.1"
+    if payload.preferred_ip and (client_ip.startswith("172.") or client_ip.startswith("192.168.128.") or client_ip == "127.0.0.1"):
+        client_ip = payload.preferred_ip
+
     ok = hub_db.record_heartbeat(
         node_id=payload.node_id,
         ip_address=client_ip,
