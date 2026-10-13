@@ -8,6 +8,7 @@ import asyncio
 import hmac
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -172,9 +173,31 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.info("Listener de tecla Copilot local no iniciado en Bridge: %s", e)
 
+    # 5. Demonio de satelite hacia Hub remoto si no es la instancia central
+    satellite_task = None
+    cluster_role = os.getenv("JOTA_CLUSTER_ROLE", "standalone").lower()
+    if cluster_role != "hub":
+        try:
+            from jota.satellite import SatelliteClient, SatelliteConfig
+
+            sat_cfg = SatelliteConfig.load_from_file()
+            hub_env = os.getenv("JOTA_HUB_URL")
+            if hub_env:
+                sat_cfg.hub_url = hub_env
+            if sat_cfg.hub_url and ("127.0.0.1" not in sat_cfg.hub_url and "localhost" not in sat_cfg.hub_url):
+                sat_cfg.port = BRIDGE_PORT
+                sat_client = SatelliteClient(sat_cfg)
+                satellite_task = asyncio.create_task(sat_client.run_agent())
+                logger.info("Cliente satelite activo y reportando a Hub: %s", sat_cfg.hub_url)
+        except Exception as e:
+            logger.info("Demonio de satelite no iniciado: %s", e)
+
     yield
 
     # Limpieza al apagar
+    if satellite_task:
+        satellite_task.cancel()
+
     if copilot_service:
         try:
             copilot_service.stop()
