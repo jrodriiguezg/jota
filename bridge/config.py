@@ -18,6 +18,11 @@ BRIDGE_API_KEY: str = os.getenv("JOTA_BRIDGE_API_KEY", "jota-secret-tailscale-ke
 BRIDGE_TEMP_DIR: Path = Path(os.getenv("JOTA_BRIDGE_TEMP_DIR", "/tmp/jota_bridge"))
 BRIDGE_TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
+# Directorio persistente de datos del Hub y base de datos SQLite
+JOTA_DATA_DIR: Path = Path(os.getenv("JOTA_DATA_DIR", "/app/data" if Path("/app/data").exists() else str(Path.home() / ".local" / "share" / "jota" / "data")))
+JOTA_DATA_DIR.mkdir(parents=True, exist_ok=True)
+HUB_DB_PATH: Path = Path(os.getenv("JOTA_HUB_DB", str(JOTA_DATA_DIR / "jota.db")))
+
 # ── Politica de Seguridad de Archivos ─────────────────────────────────────────
 # Rutas raiz autorizadas para descarga de archivos desde el movil
 HOME_PATH = Path.home().resolve()

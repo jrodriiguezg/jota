@@ -535,6 +535,56 @@ def match_fast_intent(text: str) -> tuple[str, dict] | None:
     if m_cont_start:
         return "container_action", {"action": "start", "target": m_cont_start.group(1)}
 
+    # 21b. Monitorizacion y control del Homelab (servidor elitedesk)
+    if re.search(
+        r"^(?:como\s+esta\s+(?:el\s+)?(?:homelab|servidor)|"
+        r"estado\s+del\s+(?:homelab|servidor)|"
+        r"servicios\s+de\s+elitedesk|contenedores\s+de\s+elitedesk|"
+        r"estan\s+(?:(?:todos\s+)?los\s+)?servicios\s+de\s+elitedesk\s+levantados)$",
+        clean,
+    ):
+        return "homelab_control", {"action": "status"}
+
+    m_home_restart = re.search(
+        r"^(?:reinicia|reiniciar)\s+(?:el\s+contenedor\s+(?:de\s+)?)?([a-zA-Z0-9_.-]+)\s+"
+        r"en\s+(?:el\s+servidor|elitedesk|el\s+homelab|homelab)$",
+        clean,
+    )
+    if m_home_restart:
+        return "homelab_control", {"action": "restart", "target": m_home_restart.group(1)}
+
+    m_home_check = re.search(
+        r"^(?:como\s+esta|esta\s+levantado)\s+([a-zA-Z0-9_.-]+)\s+"
+        r"en\s+(?:el\s+servidor|elitedesk|el\s+homelab|homelab)$",
+        clean,
+    )
+    if m_home_check:
+        return "homelab_control", {"action": "check", "target": m_home_check.group(1)}
+
+    # 21c. Cluster de servidores y satelites
+    if re.search(
+        r"^(?:que\s+servidores\s+(?:estan\s+activos|hay|tengo|estan\s+en\s+el\s+cluster)|"
+        r"estado\s+de\s+los\s+servidores|"
+        r"servidores\s+del\s+cluster|"
+        r"nodos\s+(?:del\s+cluster|activos|conectados)|"
+        r"satelites\s+(?:activos|conectados))$",
+        clean,
+    ):
+        return "cluster_nodes", {"status": "all"}
+
+    m_node_telemetry = re.search(
+        r"^(?:como\s+esta\s+el\s+servidor|estado\s+del\s+servidor|telemetria\s+de(?:l\s+servidor)?)\s+([a-zA-Z0-9_.-]+)$",
+        clean,
+    )
+    if m_node_telemetry:
+        return "cluster_node_telemetry", {"name": m_node_telemetry.group(1)}
+
+    if re.search(
+        r"^(?:contenedores\s+del\s+cluster|contenedores\s+de\s+todos\s+los\s+servidores)$",
+        clean,
+    ):
+        return "cluster_containers", {}
+
     # 22. Monitor de consumo (RAM / CPU) y matar procesos
     if re.search(
         r"^(?:que\s+proceso\s+(?:(?:esta\s+)?(?:consumiendo|consume)|usa|gasta)\s+m[aá]s\s+"
@@ -1041,6 +1091,24 @@ def _parse_llm_tool_call_raw(llm_output: str) -> tuple[str, dict] | None:
         target = args.get("target") or args.get("name") or args.get("container", "")
         return "container_action", {"action": action, "target": target}
 
+    # 28b. Gestion y estado de servicios del Homelab (elitedesk)
+    if norm_name in ("homelabcontrol", "homelab", "homelab_control", "elitedesk"):
+        action = args.get("action", "status")
+        target = args.get("target") or args.get("name") or args.get("container", "")
+        return "homelab_control", {"action": action, "target": target}
+
+    # 28c. Gestion y estado de nodos del cluster
+    if norm_name in ("clusternodes", "cluster_nodes", "nodes", "satelites", "servidores"):
+        return "cluster_nodes", {"status": args.get("status", "all")}
+
+    if norm_name in ("clusternodetelemetry", "cluster_node_telemetry", "nodetelemetry", "servertelemetry"):
+        target = args.get("name") or args.get("node_id") or args.get("target", "")
+        return "cluster_node_telemetry", {"name": target}
+
+    if norm_name in ("clustercontainers", "cluster_containers", "contenedorescluster"):
+        target = args.get("name") or args.get("container", "")
+        return "cluster_containers", {"name": target}
+
     # 29. Monitor de procesos (CPU / RAM)
     if norm_name in (
         "processmonitor",
@@ -1435,6 +1503,20 @@ def execute_tool(tool_name: str, args: dict) -> tuple[bool, str]:
     if tool_name == "favorite_song":
         from jota.tools.navidrome import mark_current_song_favorite
         return mark_current_song_favorite()
+
+    if tool_name == "cluster_nodes":
+        from jota.tools.cluster import query_cluster_nodes
+        return query_cluster_nodes(status_filter=args.get("status", "all"))
+
+    if tool_name == "cluster_node_telemetry":
+        from jota.tools.cluster import query_node_telemetry
+        target = args.get("name") or args.get("node_id") or args.get("target", "")
+        return query_node_telemetry(node_name_or_id=str(target))
+
+    if tool_name == "cluster_containers":
+        from jota.tools.cluster import query_cluster_containers
+        target = args.get("name") or args.get("container", "")
+        return query_cluster_containers(name_filter=str(target))
 
     return False, f"Herramienta no implementada: {tool_name}"
 
