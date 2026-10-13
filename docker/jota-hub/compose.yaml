@@ -26,8 +26,10 @@ services:
       - NAVIDROME_USER=${NAVIDROME_USER:-admin}
       - NAVIDROME_SALT=${NAVIDROME_SALT:-}
       - NAVIDROME_TOKEN=${NAVIDROME_TOKEN:-}
+      - JOTA_CLUSTER_ROLE=hub
     volumes:
       - ./data:/app/data
       - ./models:/app/models:ro
       - ./bridge:/app/bridge:ro
+      - ./jota:/app/jota:ro
       - /run/user/1000/docker.sock:/var/run/docker.sock:ro

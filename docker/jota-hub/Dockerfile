@@ -33,7 +33,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
         docker \
         soundfile \
         numpy \
-        scipy
+        scipy \
+        cryptography>=42.0.0 \
+        pyyaml>=6.0
 
 RUN pip install --no-cache-dir llama-cpp-python \
     --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu || \
