@@ -79,7 +79,7 @@ cd ~/jota-satelite
 | `--server-token <TOKEN>` | Token secreto del cluster (`X-Jota-Token`) | Solicitar interactivamente |
 | `--mode <desktop\|headless>` | Perfil de ejecucion (`desktop` o `headless`) | `desktop` |
 | `--name <NOMBRE_NODO>` | Nombre amigable para identificar este nodo en el Hub | Nombre de hostname del host |
-| `--port <PUERTO>` | Puerto del Hub al que conectar | `8765` |
+| `--server-port, --port <PUERTO>` | Puerto del Hub al que conectar | `8765` |
 | `--unattended` | Modo no interactivo (requiere `--server-token`) | Desactivado |
 
 ### Ejemplos de Instalacion
@@ -169,12 +169,19 @@ sudo journalctl -u jota-satelite.service -f
 
 ## 7. Verificacion y Pruebas
 
-Para comprobar que el satelite se conecta correctamente al Hub:
+Para comprobar que el satelite y su identidad de hardware estan correctamente configurados:
 
 ```bash
-# Ejecutar prueba de conexion con el Hub
-python3 -m jota.cli check-hub
+# Inspeccionar identidad infalsificable del nodo y capacidades detectadas (CPU/GPU)
+python3 -m jota.satellite --status
+
+# Ejecutar satelite manualmente en primer plano para depuracion
+python3 -m jota.satellite --mode desktop
+
+# Ejecutar satelite en modo headless de telemetria
+python3 -m jota.satellite --mode headless
 
 # Ejecutar bateria de pruebas unitarias locales
 pytest -q
 ```
+

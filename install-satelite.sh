@@ -24,7 +24,7 @@ Instalador automatizado para Jota Satelite.
 
 Opciones:
   --server-ip <IP_O_HOST>       Direccion IP o dominio de Jota Hub
-  --server-port <PUERTO>        Puerto del servidor Hub (por defecto: 8765)
+  --server-port, --port <PUERTO> Puerto del servidor Hub (por defecto: 8765)
   --server-token <TOKEN>        Token secreto del cluster (X-Jota-Token)
   --mode <desktop|headless>     Perfil de instalacion (por defecto: desktop)
   --name <NOMBRE_NODO>          Nombre de este equipo en el cluster (por defecto: hostname)
@@ -49,11 +49,11 @@ while [[ $# -gt 0 ]]; do
             SERVER_IP="${1#*=}"
             shift 1
             ;;
-        --server-port)
+        --server-port|--port)
             SERVER_PORT="$2"
             shift 2
             ;;
-        --server-port=*)
+        --server-port=*|--port=*)
             SERVER_PORT="${1#*=}"
             shift 1
             ;;
